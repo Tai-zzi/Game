@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>베르넬: 풀린 실의 세계</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=Noto+Sans+KR:wght@400;600;800&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <div id="game"></div>
+
+  <!-- 월드 위 오버레이 (데미지 숫자, 이름표) -->
+  <div id="overlay"></div>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div id="player-frame" class="panel stitched">
+      <div class="pf-top"><span id="pf-name">수선공</span><span id="pf-level" class="badge">Lv 1</span></div>
+      <div class="pf-class">견습 수선공 · 수선공 연맹</div>
+      <div class="bar hp"><div class="fill" id="pf-hp"></div><span id="pf-hp-text"></span></div>
+    </div>
+
+    <div id="target-frame" class="panel stitched hidden">
+      <div class="tf-top"><span id="tf-name"></span><span id="tf-level" class="badge"></span></div>
+      <div id="tf-kind" class="tf-kind"></div>
+      <div class="bar hp"><div class="fill" id="tf-hp"></div><span id="tf-hp-text"></span></div>
+    </div>
+
+    <div id="minimap-wrap" class="panel stitched">
+      <div id="zone-name">하르벤 계곡</div>
+      <canvas id="minimap" width="176" height="176"></canvas>
+      <div id="coords"></div>
+    </div>
+
+    <div id="quest-tracker" class="panel stitched"></div>
+
+    <div id="log-wrap" class="panel stitched">
+      <div id="log-tabs"><span class="tab active">전체</span><span class="tab disabled" title="멀티플레이 준비 중">파티</span><span class="tab disabled" title="멀티플레이 준비 중">길드</span></div>
+      <div id="log"></div>
+      <input id="chat-input" maxlength="120" placeholder="Enter: 채팅 (지금은 혼자만 들립니다)" autocomplete="off" />
+    </div>
+
+    <div id="bottom">
+      <div id="tension-wrap">
+        <div id="tension-label">장력 <span id="tension-value">0</span></div>
+        <div id="tension-bar"><div id="tension-fill"></div><div class="tick" style="left:20%"></div><div class="tick" style="left:50%"></div><div class="tick" style="left:75%"></div></div>
+      </div>
+      <div id="skillbar"></div>
+      <div id="xp-bar"><div id="xp-fill"></div><span id="xp-text"></span></div>
+    </div>
+
+    <div id="keyhint"></div>
+    <div id="banner" class="hidden"></div>
+    <div id="toast"></div>
+    <div id="death-screen" class="hidden">실이 끊어졌습니다…<small>곧 공동 베틀 곁에서 깨어납니다</small></div>
+  </div>
+
+  <!-- 대화 -->
+  <div id="dialog" class="hidden">
+    <div class="dlg-box stitched">
+      <div class="dlg-head"><span id="dlg-name"></span><span id="dlg-title"></span></div>
+      <div id="dlg-text"></div>
+      <div id="dlg-options"></div>
+      <div class="dlg-hint">클릭 또는 Space로 계속</div>
+    </div>
+  </div>
+
+  <!-- 타이틀 -->
+  <div id="title">
+    <div class="title-threads"></div>
+    <div class="title-inner">
+      <div class="title-sub">대직물 연대기 · 903년</div>
+      <h1>베르넬</h1>
+      <div class="title-tag">풀린 실의 세계</div>
+      <div class="title-form stitched">
+        <label for="name-input">수선공의 이름</label>
+        <input id="name-input" maxlength="12" placeholder="이름을 입력하세요" autocomplete="off" />
+        <button id="start-btn">실을 잇다</button>
+        <button id="new-btn" class="link hidden">처음부터 새로 시작</button>
+      </div>
+      <div class="title-foot">마우스 우클릭/좌클릭 이동 · 좌클릭 적 공격 · Q W E 기술 · Space 기본 공격 · F 대화 · F2 키 배치 전환</div>
+    </div>
+    <div id="loading">하르벤 계곡을 짜는 중…</div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

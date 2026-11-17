@@ -1,0 +1,21 @@
+{
+  "name": "bernel",
+  "private": true,
+  "version": "0.1.0",
+  "description": "베르넬: 풀린 실의 세계 - 3D 쿼터뷰 액션 MMORPG (Phase 1 vertical slice)",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test:logic": "node tools/sim-test.js",
+    "art": "node tools/higgsfield/generate.mjs",
+    "art:free": "node tools/higgsfield/pollinations.mjs"
+  },
+  "dependencies": {
+    "three": "0.170.0"
+  },
+  "devDependencies": {
+    "vite": "5.4.11"
+  }
+}
