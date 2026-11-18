@@ -1,4 +1,4 @@
-// 베르넬 캐릭터/몬스터 아트 프리셋 (D:\Game 설정서 기반)
+// 베르넬 캐릭터/몬스터 아트 프리셋 (v0.3 제안 기준)
 // 생성 결과: public/art/<id>.<ext>
 //  - 게임 내 초상화(대화창/타깃 프레임)로 사용
 //  - 추후 Blender + Higgsfield 이미지→3D 변환의 입력(정면 전신 시트)으로 사용 → public/models/<id>.glb
@@ -17,19 +17,24 @@ const p = (title, prompt, aspect_ratio = '2:3') => ({
 });
 
 export const PRESETS = {
-  // ── 플레이어 ──
-  player_mender: p('견습 수선공 (주인공, 전신)',
-    `young apprentice mender adventurer, layered woolen tunic with embroidered thread patterns, leather apron with spools and needles, glowing golden thread wrapped around forearms, short patched cape, sturdy boots, ${SHEET}`),
-  player_mender_portrait: p('견습 수선공 (초상화)',
-    `young apprentice mender adventurer, determined hopeful expression, woolen hood, a single glowing golden thread floating near the face, ${PORTRAIT}`, '1:1'),
-  class_puller: p('당김꾼 (1차 전직, 근접)',
-    `muscular melee warrior who pulls threads of fate, longsword with thread wound around the hilt, taut glowing threads stretching from gauntlets, quilted armor with knot motifs, ${SHEET}`),
+  // ── 플레이어: v0.3 수직 단면 4직업 (정면 전신 시트, 무기 실루엣으로 구분) ──
+  // 직업은 전투 방식일 뿐 성격·도덕성을 정하지 않는다 → 표정은 중립적으로
+  player_guardian: p('수호기사 (전신)',
+    `defensive shield fighter, large rectangular wooden tower shield with visible repair patches on the left arm, short spear in the right hand, low grounded stance, padded gambeson with woven trim, practical travel boots, neutral calm expression, ${SHEET}`),
+  player_archer: p('매듭궁수 (전신)',
+    `ranged hunter, tall longbow with knotted cord wrapping, leather quiver on the back, a faint glowing aiming thread line, hooded green travel cloak, light layered leather armor, neutral focused expression, ${SHEET}`),
+  player_elementalist: p('원소직조사 (전신)',
+    `workshop elemental scholar, wooden staff topped with a glowing ember crystal, a circular sigil plate of woven glowing lines floating behind the back, heat-resistant layered coat with soot marks, neutral thoughtful expression, ${SHEET}`),
+  player_dyer: p('생명염색사 (전신)',
+    `field medic dyer, green-stained work apron with a row of colored dye bottles, slim applicator rod with a glowing green tip, rolled sleeves with dye stains, satchel of bandages, neutral attentive expression, ${SHEET}`),
 
-  // ── NPC ──
-  npc_elder: p('하르벤 마을 장로 (전신)',
-    `elderly village elder of a peaceful weaving valley, kind wrinkled face, long grey braided beard, thick knitted shawl with valley sheep patterns, wooden staff topped with a small spinning wheel, ${SHEET}`),
-  npc_elder_portrait: p('하르벤 마을 장로 (초상화)',
-    `elderly village elder, kind but worried expression, long grey braided beard, thick knitted shawl, ${PORTRAIT}`, '1:1'),
+  // ── 주요 NPC 초상화 (v0.3 §7) ──
+  npc_haila_portrait: p('하일라 몬티스 (초상화)',
+    `contract supervisor woman in her forties, rain-soaked grey coat, holding a ledger full of corrections and crossed-out names, tired but attentive eyes, ${PORTRAIT}`, '1:1'),
+  npc_belo_portrait: p('벨로 하르크 (초상화)',
+    `veteran shield instructor man in his fifties, weathered face, a battered round shield with repair marks on his back, restrained regret in the eyes, ${PORTRAIT}`, '1:1'),
+  npc_mora_portrait: p('모라 페넬 (초상화)',
+    `calm doctor woman in her thirties, rows of colored pigment bottles on her belt, worn medical ledger and pen, gentle but firm expression, ${PORTRAIT}`, '1:1'),
 
   // ── 몬스터 ──
   mob_unravel_sheep: p('풀린 양 (몬스터)',

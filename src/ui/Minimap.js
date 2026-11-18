@@ -1,4 +1,5 @@
 import { HARVEN, heightAt, riverX } from '../data/zones.js';
+import { npcMarker } from '../game/Dialogs.js';
 
 /**
  * 원형 미니맵. 지형은 한 번만 오프스크린 캔버스에 그려두고,
@@ -65,8 +66,15 @@ export class Minimap {
       if (e.kind === 'monster') {
         ctx.fillStyle = e.ai.state === 'idle' ? '#e2775a' : '#ff3a2a';
         ctx.beginPath(); ctx.arc(x, y, 2.6, 0, Math.PI * 2); ctx.fill();
-      } else {
-        const m = this.game.quests.npcMarker(p, e.npcId);
+      } else if (e.kind === 'cart') {
+        ctx.fillStyle = '#6ad08a'; ctx.fillRect(x - 4, y - 4, 8, 8);
+      } else if (e.kind === 'clue') {
+        if ((p.records.clues || []).includes(e.data.id)) continue;
+        ctx.fillStyle = '#9fd0ff'; ctx.beginPath(); ctx.moveTo(x, y - 4); ctx.lineTo(x + 3.5, y); ctx.lineTo(x, y + 4); ctx.lineTo(x - 3.5, y); ctx.fill();
+      } else if (e.kind === 'node' || e.kind === 'station') {
+        ctx.fillStyle = e.kind === 'station' ? '#ffd27a' : '#c49a63'; ctx.beginPath(); ctx.arc(x, y, 2.4, 0, Math.PI * 2); ctx.fill();
+      } else if (e.kind === 'npc') {
+        const m = npcMarker(this.game, p, e.npcId);
         ctx.fillStyle = '#ffd24a';
         ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill();
         if (m === '!' || m === '?') {
@@ -75,6 +83,15 @@ export class Minimap {
           ctx.restore();
         }
       }
+    }
+    // 다리 상태 표시
+    {
+      const bz = HARVEN.bridge.z, bx = riverX(bz);
+      const x = (bx - p.pos.x) * scale, y = (bz - p.pos.z) * scale;
+      const col = { broken: '#ff4a3a', detour: '#ffb84a', temp_bridge: '#ffd24a', repaired: '#6ad08a' }[this.game.publicState.bridge.state];
+      ctx.strokeStyle = col; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(x - 9 * scale, y); ctx.lineTo(x + 9 * scale, y); ctx.stroke();
+      if (this.game.publicState.bridge.state === 'broken') { ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x - 4, y - 4); ctx.lineTo(x + 4, y + 4); ctx.moveTo(x + 4, y - 4); ctx.lineTo(x - 4, y + 4); ctx.stroke(); }
     }
     // 플레이어 화살표
     ctx.rotate(-p.rot);

@@ -2,7 +2,7 @@
 // 무료 대안: Pollinations (https://enter.pollinations.ai) — 같은 프리셋(presets.mjs) 사용
 // 키: 프로젝트 루트 .env.local 의 POLLINATIONS_API_KEY  (enter.pollinations.ai/keys 에서 발급)
 // 사용법:
-//   node tools/higgsfield/pollinations.mjs player_mender
+//   node tools/higgsfield/pollinations.mjs player_guardian
 //   node tools/higgsfield/pollinations.mjs --all
 //   node tools/higgsfield/pollinations.mjs --model zimage --seed 7 npc_elder
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';

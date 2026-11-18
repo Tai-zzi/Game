@@ -20,3 +20,32 @@ export const ITEMS = {
 export const RECIPES = {
   brace: { out: 'brace', count: 1, needs: { lumber: 2, clamp: 1 }, time: 1.5 },
 };
+
+/**
+ * 상점 소모품·장비 (Phase 2). 골드만 사용, 유료 아이템 없음. 가격·능력치는 검증 전 예시.
+ * slot: weapon | armor | accessory, classes: 착용 가능 직업 (null = 공용), stats: 더해지는 능력치
+ */
+Object.assign(ITEMS, {
+  potion_s: { id: 'potion_s', name: '회복약 (소)', type: 'consumable', price: 15, sell: 5, color: '#e86a5a', heal: 0.35, cooldown: 8,
+    desc: '즉시 최대 체력의 35%를 회복한다. 회복약 재사용 8초.' },
+  potion_m: { id: 'potion_m', name: '회복약 (중)', type: 'consumable', price: 40, sell: 12, color: '#ff4a6a', heal: 0.6, cooldown: 8,
+    desc: '즉시 최대 체력의 60%를 회복한다. 회복약 재사용 8초.' },
+  salve: { id: 'salve', name: '결 연고', type: 'consumable', price: 12, sell: 4, color: '#9fd0ff', cleanse: true, cooldown: 8,
+    desc: '찢김·둔화를 지운다. 회복약과 재사용 시간을 공유한다.' },
+  gw1: { id: 'gw1', name: '강철 촉 단창', type: 'gear', slot: 'weapon', classes: ['guardian'], price: 60, sell: 20, color: '#cfd5dc', stats: { atk: 4 }, desc: '수호기사용. 짧고 무거운 창.' },
+  ga1: { id: 'ga1', name: '덧댄 누비 갑옷', type: 'gear', slot: 'armor', classes: ['guardian'], price: 70, sell: 22, color: '#56677a', stats: { maxHp: 45, def: 3 }, desc: '수호기사용. 여러 번 기운 자국이 있다.' },
+  aw1: { id: 'aw1', name: '매듭 장궁', type: 'gear', slot: 'weapon', classes: ['archer'], price: 60, sell: 20, color: '#b48a5a', stats: { atk: 5, critChance: 0.03 }, desc: '매듭궁수용. 시위에 매듭이 셋.' },
+  aa1: { id: 'aa1', name: '사냥꾼 가죽옷', type: 'gear', slot: 'armor', classes: ['archer'], price: 55, sell: 18, color: '#5d7a48', stats: { maxHp: 25, def: 2 }, desc: '매듭궁수용. 가볍다.' },
+  ew1: { id: 'ew1', name: '불씨 결정 지팡이', type: 'gear', slot: 'weapon', classes: ['elementalist'], price: 65, sell: 21, color: '#ff8a4a', stats: { atk: 6 }, desc: '원소직조사용. 끝이 늘 따뜻하다.' },
+  ea1: { id: 'ea1', name: '내열 코트', type: 'gear', slot: 'armor', classes: ['elementalist'], price: 55, sell: 18, color: '#7a3f4a', stats: { maxHp: 22, def: 2 }, desc: '원소직조사용. 그을음 자국.' },
+  dw1: { id: 'dw1', name: '은빛 도포봉', type: 'gear', slot: 'weapon', classes: ['dyer'], price: 55, sell: 18, color: '#6ad08a', stats: { atk: 3, maxHp: 15 }, desc: '생명염색사용. 안료가 고르게 묻는다.' },
+  da1: { id: 'da1', name: '방수 작업 앞치마', type: 'gear', slot: 'armor', classes: ['dyer'], price: 60, sell: 20, color: '#4f8a6a', stats: { maxHp: 32, def: 2 }, desc: '생명염색사용. 염료가 스미지 않는다.' },
+  acc1: { id: 'acc1', name: '매듭 팔찌', type: 'gear', slot: 'accessory', classes: null, price: 45, sell: 15, color: '#e8c87a', stats: { maxHp: 18 }, desc: '공용. 누군가 풀리지 말라고 묶어 준 매듭.' },
+  acc2: { id: 'acc2', name: '실 반지', type: 'gear', slot: 'accessory', classes: null, price: 50, sell: 16, color: '#ffd24a', stats: { atk: 1.5, critChance: 0.02 }, desc: '공용. 금실 한 가닥을 감았다.' },
+});
+
+/** 현지 상인 진열 목록 */
+export const SHOP_STOCK = {
+  merchant: ['potion_s', 'potion_m', 'salve', 'lumber', 'clamp', 'gw1', 'ga1', 'aw1', 'aa1', 'ew1', 'ea1', 'dw1', 'da1', 'acc1', 'acc2'],
+};
+export const EQUIP_SLOTS = { weapon: '무기', armor: '방어구', accessory: '장신구' };

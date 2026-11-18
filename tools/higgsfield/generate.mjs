@@ -5,7 +5,7 @@
 //
 // 사용법:
 //   node tools/higgsfield/generate.mjs --list                     프리셋 목록
-//   node tools/higgsfield/generate.mjs player_mender               프리셋 1개 생성
+//   node tools/higgsfield/generate.mjs player_guardian               프리셋 1개 생성
 //   node tools/higgsfield/generate.mjs --all                       모든 프리셋 생성
 //   node tools/higgsfield/generate.mjs --model <path> --prompt "..." [--param key=value ...] --out name
 //   node tools/higgsfield/generate.mjs --status <request_id>       상태만 조회
@@ -177,7 +177,7 @@ async function main() {
   if (a.list || (!a._.length && !a.all && !a.prompt && !a.status && !a.cancel)) {
     console.log('프리셋 목록 (기본 모델:', DEFAULT_MODEL + ')');
     for (const [id, p] of Object.entries(PRESETS)) console.log(`  ${id.padEnd(22)} ${p.title}`);
-    console.log('\n예) node tools/higgsfield/generate.mjs player_mender');
+    console.log('\n예) node tools/higgsfield/generate.mjs player_guardian');
     return;
   }
   const key = loadKey();

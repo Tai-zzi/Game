@@ -1,13 +1,16 @@
 import * as THREE from 'three';
 
 /**
- * 키 배치 프리셋.
- *  lostark: 마우스 이동(+방향키), 스킬 Q/W/E (1/2/3도 가능)
- *  wasd   : WASD 이동, 스킬 1/2/3 (+Q/E)
+ * 키 배치 프리셋 (W 충돌 해결: 이동 방식에 따라 기술 줄 전체를 옮긴다)
+ *  lostark: 마우스 이동(+방향키) · 기술 Q W E R / A S D F · 각성 V · 기본 공격 C(또는 적 좌클릭) · 구르기 Space · 상호작용 G
+ *  wasd   : WASD 이동 · 기술 1~8 · 각성 X · 기본 공격 Z(또는 적 좌클릭) · 구르기 Space · 상호작용 G
+ * 공통: T 회복약, I 소지품, Tab 대상, F2 배치 전환, F3 그래픽 품질
  */
 export const KEYMAPS = {
-  lostark: { label: '로스트아크식 (마우스 이동 · QWE)', move: { up: ['ArrowUp'], down: ['ArrowDown'], left: ['ArrowLeft'], right: ['ArrowRight'] }, skills: { KeyQ: 'pullSlash', KeyW: 'tauten', KeyE: 'release', Digit1: 'pullSlash', Digit2: 'tauten', Digit3: 'release' } },
-  wasd: { label: 'WASD 이동 · 123', move: { up: ['KeyW', 'ArrowUp'], down: ['KeyS', 'ArrowDown'], left: ['KeyA', 'ArrowLeft'], right: ['KeyD', 'ArrowRight'] }, skills: { Digit1: 'pullSlash', Digit2: 'tauten', Digit3: 'release', KeyQ: 'pullSlash', KeyE: 'release' } },
+  lostark: { label: '로스트아크식 (마우스 이동 · QWER/ASDF)', move: { up: ['ArrowUp'], down: ['ArrowDown'], left: ['ArrowLeft'], right: ['ArrowRight'] },
+    slots: { KeyQ: 'q', KeyW: 'w', KeyE: 'e', KeyR: 'r', KeyA: 'a', KeyS: 's', KeyD: 'd', KeyF: 'f', KeyV: 'ult', KeyC: 'basic', Space: 'dodge' } },
+  wasd: { label: 'WASD 이동 · 기술 1~8', move: { up: ['KeyW', 'ArrowUp'], down: ['KeyS', 'ArrowDown'], left: ['KeyA', 'ArrowLeft'], right: ['KeyD', 'ArrowRight'] },
+    slots: { Digit1: 'q', Digit2: 'w', Digit3: 'e', Digit4: 'r', Digit5: 'a', Digit6: 's', Digit7: 'd', Digit8: 'f', KeyX: 'ult', KeyZ: 'basic', Space: 'dodge' } },
 };
 
 /**
@@ -25,6 +28,8 @@ export class Input {
     this.held = { left: false, right: false };
     this.holdTimer = 0;
     this.keys = new Set();
+    this.heldSlots = new Set();
+    this.aimSendT = 0;
     this.lastDir = { x: 0, z: 0 };
     this.enabled = false;
     // 카메라 기준 방향 (쿼터뷰 고정 방향)
@@ -38,7 +43,7 @@ export class Input {
     window.addEventListener('mousemove', (e) => { this.mouse.x = e.clientX; this.mouse.y = e.clientY; });
     window.addEventListener('keydown', (e) => this.onKey(e, true));
     window.addEventListener('keyup', (e) => this.onKey(e, false));
-    window.addEventListener('blur', () => { this.keys.clear(); this.held.left = this.held.right = false; });
+    window.addEventListener('blur', () => { for (const s of this.heldSlots) this.send({ type: 'skillRelease', slot: s }); this.heldSlots.clear(); this.keys.clear(); this.held.left = this.held.right = false; });
   }
 
   get keymap() { return KEYMAPS[this.keymapId]; }
@@ -60,7 +65,8 @@ export class Input {
     const ent = entityId != null ? this.hooks.getEntity(entityId) : null;
     if (e.button === 0 || e.button === 2) {
       if (ent?.kind === 'monster' && ent.alive) { this.send({ type: 'attackTarget', targetId: ent.id }); return; }
-      if (ent?.kind === 'npc') { this.send({ type: 'setTarget', targetId: ent.id }); this.send({ type: 'interact', id: ent.id }); return; }
+      if (ent && ['npc', 'node', 'clue', 'station'].includes(ent.kind)) { this.send({ type: 'setTarget', targetId: ent.kind === 'npc' ? ent.id : null }); this.send({ type: 'interact', id: ent.id }); return; }
+      if (ent?.kind === 'cart') { this.send({ type: 'setTarget', targetId: ent.id }); }
       if (ground) {
         this.send({ type: 'moveTo', x: ground.x, z: ground.z });
         this.hooks.onMoveMarker?.(ground);
@@ -76,18 +82,23 @@ export class Input {
       return;
     }
     if (down) this.keys.add(e.code); else this.keys.delete(e.code);
-    if (!down || !this.enabled) return;
-    if (e.repeat && !this.keymap.skills[e.code] && e.code !== 'Space') return;
-    const skill = this.keymap.skills[e.code];
-    if (skill) { e.preventDefault(); this.send({ type: 'skill', skillId: skill, aim: this.aim }); return; }
+    if (!this.enabled) return;
+    const slot = this.keymap.slots[e.code];
+    if (!down) { // 차지·유지 기술은 놓을 때
+      if (slot && this.heldSlots.has(slot)) { this.heldSlots.delete(slot); this.send({ type: 'skillRelease', slot, aim: this.aim }); }
+      return;
+    }
+    if (e.repeat) { if (slot) e.preventDefault(); return; }
+    if (slot) { e.preventDefault(); this.heldSlots.add(slot); this.send({ type: 'skill', slot, aim: this.aim }); return; }
     switch (e.code) {
-      case 'Space': e.preventDefault(); this.send({ type: 'skill', skillId: 'basic', aim: this.aim }); break;
-      case 'KeyF': this.hooks.onInteractKey?.(); break;
+      case 'KeyI': this.hooks.onInventory?.(); break;
+      case 'KeyG': this.hooks.onInteractKey?.(); break;
+      case 'KeyT': this.send({ type: 'quickPotion' }); break;
+      case 'F3': e.preventDefault(); this.hooks.onQuality?.(); break;
       case 'Tab': e.preventDefault(); this.hooks.onTabTarget?.(); break;
       case 'Escape': this.hooks.onEscape?.(); break;
       case 'Enter': e.preventDefault(); this.hooks.onChat?.(); break;
       case 'F2': e.preventDefault(); this.toggleKeymap(); break;
-      case 'KeyS': if (this.keymapId === 'lostark') this.send({ type: 'stop' }); break;
     }
   }
 
@@ -106,6 +117,7 @@ export class Input {
     this.plane.constant = -(this.hooks.aimHeight?.() ?? 0);
     const hit = this.ray.ray.intersectPlane(this.plane, this.tmpV || (this.tmpV = new THREE.Vector3()));
     if (hit) this.aim = { x: hit.x, z: hit.z, y: hit.y };
+    if (this.heldSlots.size && this.aim) { this.aimSendT -= dt; if (this.aimSendT <= 0) { this.aimSendT = 0.1; this.send({ type: 'aim', x: this.aim.x, z: this.aim.z }); } }
     // 마우스 꾹 누르기 → 계속 커서 방향 이동 (로스트아크식)
     if ((this.held.left || this.held.right) && this.aim) {
       this.holdTimer -= dt;

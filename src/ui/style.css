@@ -6,7 +6,6 @@
   --thread: #ffd27a;
   --hp: #c8553d;
   --hp2: #e2775a;
-  --tension: #e8b04a;
   --void: #8fa3ff;
   --serif: 'Gowun Batang', 'Batang', serif;
   --sans: 'Noto Sans KR', 'Malgun Gothic', sans-serif;
@@ -66,14 +65,6 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #1c1612; fon
 
 #bottom { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; }
 #bottom > * { pointer-events: auto; }
-#tension-wrap { width: 340px; }
-#tension-label { font-family: var(--serif); font-size: 13px; color: #fff3d6; text-shadow: 0 1px 3px #000; margin-bottom: 2px; }
-#tension-bar { position: relative; height: 12px; background: rgba(30,20,12,0.8); border-radius: 6px; overflow: hidden; border: 1px solid rgba(232,200,122,0.5); }
-#tension-fill { height: 100%; width: 0; background: repeating-linear-gradient(90deg, #e8b04a 0 6px, #f4c862 6px 9px); transition: width 0.1s; }
-#tension-bar .tick { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255,255,255,0.35); }
-#tension-wrap.high #tension-fill { background: repeating-linear-gradient(90deg, #ff9a4a 0 6px, #ffc06a 6px 9px); }
-#tension-wrap.max #tension-fill { background: repeating-linear-gradient(90deg, #ff4a3a 0 6px, #ff8a6a 6px 9px); animation: shake 0.08s infinite; }
-#tension-wrap.max #tension-label { color: #ff8a6a; }
 @keyframes shake { 50% { transform: translateX(1px); } }
 
 #skillbar { display: flex; gap: 8px; }
@@ -155,3 +146,123 @@ button.link { background: none; border: none; color: #d9c7a6; font-size: 12px; c
 #loading { position: absolute; bottom: 30px; font-family: var(--serif); color: #e8c87a; opacity: 0.7; }
 
 .plate, .dmg { left: 0; top: 0; }
+
+/* ───── v0.3 단면 ───── */
+#right-col { position: absolute; right: 16px; top: 250px; width: 250px; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+#right-col > * { pointer-events: auto; }
+#quest-tracker { position: static; width: auto; }
+#quest-tracker:empty { display: block; }
+.qt-obj.current { color: #fff3c0; }
+.qt-obj.done { color: #a9d98a; text-decoration: line-through; opacity: 0.7; }
+.qt-obj small, .qt-title small { opacity: 0.7; font-weight: 400; }
+#public-panel { font-size: 12px; }
+.pub-desc { opacity: 0.75; margin-bottom: 4px; }
+.pub-row { display: grid; grid-template-columns: 70px 1fr 28px; align-items: center; gap: 4px; }
+.pub-bar { height: 6px; background: rgba(0,0,0,0.45); border-radius: 3px; overflow: hidden; }
+.pub-bar div { height: 100%; }
+.pub-bar .e { background: #e2775a; } .pub-bar .r { background: #e8b04a; } .pub-bar .i { background: #8fb3ff; } .pub-bar .n { background: #a9a59a; }
+.pub-row b { text-align: right; font-weight: 600; }
+.pub-total { margin-top: 3px; text-align: right; color: var(--thread); }
+#pf-gold { font-size: 11px; color: #ffe39a; margin-top: 4px; }
+#pf-res { display: flex; align-items: center; gap: 8px; margin-top: 5px; }
+.res-label { font-family: var(--serif); font-size: 12px; color: #fff3d6; min-width: 40px; cursor: help; }
+.res-body { flex: 1; display: flex; gap: 5px; }
+.bar.res { flex: 1; margin-top: 0; height: 10px; }
+.bar.res span { font-size: 9px; line-height: 10px; }
+.bar.res.resolve .fill { background: linear-gradient(180deg, #b8dcff, #5a8fc8); }
+.bar.res.pigment .fill { background: linear-gradient(180deg, #8ae0a0, #3a9a5a); }
+.pip { width: 14px; height: 14px; transform: rotate(45deg); background: rgba(0,0,0,0.45); border: 1px solid #ffd27a; display: inline-block; margin: 2px; }
+.pip.on { background: #ffd24a; box-shadow: 0 0 8px #ffb02a; }
+.slot { width: 30px; height: 18px; border-radius: 4px; background: rgba(0,0,0,0.45); border: 1px solid rgba(255,210,122,0.5); font-style: normal; font-size: 10px; text-align: center; line-height: 16px; color: #1a1010; font-weight: 700; }
+.skill.small { width: 46px; height: 46px; font-size: 17px; align-self: flex-end; }
+#channel { position: relative; width: 240px; height: 12px; background: rgba(30,20,12,0.85); border: 1px solid rgba(232,200,122,0.6); border-radius: 6px; overflow: hidden; }
+#channel-fill { height: 100%; width: 0; background: linear-gradient(90deg, #8fb3ff, #cfe6ff); }
+#channel-text { position: absolute; inset: 0; font-size: 10px; text-align: center; line-height: 12px; color: #fff; text-shadow: 0 1px 2px #000; }
+#inventory { position: absolute; left: 280px; top: 16px; width: 220px; font-size: 13px; }
+.inv-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+.inv-row i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+.inv-row b { margin-left: auto; }
+.inv-gold { margin-top: 6px; color: #ffe39a; text-align: right; }
+#summary { position: absolute; left: 50%; top: 22%; transform: translateX(-50%); width: min(480px, 90vw); font-size: 14px; line-height: 1.6; z-index: 6; }
+#summary p { margin: 6px 0; font-family: var(--serif); }
+button.primary { font-family: var(--serif); font-weight: 700; font-size: 15px; background: #7a4b2a; color: #ffe6b0; border: none; border-radius: 8px; padding: 7px 16px; cursor: pointer; position: relative; z-index: 1; }
+button.primary:hover { background: #95603a; }
+#log .relation { color: #e8b8ff; }
+#log .public { color: #9fe0ff; font-weight: 600; }
+.dmg.healed { color: #8ae0a0; font-size: 17px; }
+#dlg-terms { margin-top: 10px; padding: 8px 10px; border-radius: 8px; background: rgba(122,75,42,0.12); font-size: 13px; line-height: 1.6; }
+#dlg-terms b { display: inline-block; min-width: 64px; color: #7a3b22; }
+#dlg-options { flex-wrap: wrap; }
+.plate.cart .nm { color: #8ae0a0; }
+.plate.clue .nm { color: #9fd0ff; } .plate.node .nm, .plate.station .nm { color: #ffe39a; }
+/* 캐릭터 생성 */
+.title-form.create { min-width: min(820px, 94vw); text-align: left; max-height: 70vh; overflow-y: auto; }
+.title-form label small { opacity: 0.6; margin-left: 6px; }
+.choice-list { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+.choice-list.classes { grid-template-columns: repeat(4, 1fr); }
+.choice { background: rgba(0,0,0,0.3); border: 1px solid rgba(232,200,122,0.3); border-radius: 8px; color: #f6e9cf; padding: 8px; text-align: left; cursor: pointer; display: flex; flex-direction: column; gap: 2px; font-family: var(--sans); position: relative; z-index: 1; }
+.choice b { font-family: var(--serif); font-size: 15px; color: #ffe39a; }
+.choice em { font-style: normal; font-size: 11px; color: #9fd0ff; }
+.choice small { font-size: 11px; opacity: 0.8; }
+.choice small.weak { color: #ffb39a; }
+.choice.on { border-color: #ffd27a; background: rgba(122,75,42,0.6); box-shadow: 0 0 12px rgba(255,190,90,0.35); }
+.note { background: rgba(255,210,122,0.12); border-radius: 6px; padding: 8px; font-size: 12px; line-height: 1.5; }
+#continue-info { font-family: var(--serif); font-size: 16px; }
+
+/* ───── Phase 2: 기술바 8칸 · 무력화 · 각성 ───── */
+#skillbar { gap: 6px; align-items: flex-end; }
+.skill { width: 52px; height: 52px; font-size: 18px; }
+.skill.gap { margin-left: 10px; }
+.skill.ult { width: 62px; height: 62px; margin-left: 12px; border-color: #ffd24a; background: radial-gradient(circle at 50% 35%, #8a5a2e, #2f1a10); box-shadow: 0 0 14px rgba(255,190,80,0.45); }
+.skill.small { width: 42px; height: 42px; font-size: 15px; }
+.skill .tip { width: 260px; }
+.tags { margin: 3px 0; display: flex; gap: 3px; flex-wrap: wrap; }
+.tag { font-size: 10px; background: #e8dcc0; border-radius: 4px; padding: 0 5px; color: #5a3a22; }
+.tag.c { background: #5ab8ff; color: #fff; } .tag.d { background: #d9a35a; color: #fff; }
+.bar.stagger { height: 7px; margin-top: 3px; }
+.bar.stagger .fill { background: linear-gradient(180deg, #ffe08a, #d9a35a); }
+.bar.stagger span { font-size: 8px; line-height: 7px; }
+.bar.stagger.groggy .fill { background: #5ab8ff; animation: shake 0.1s infinite; }
+@keyframes shake { 50% { transform: translateX(1px); } }
+#target-frame.elite { border: 1px solid #ffb84a; box-shadow: 0 0 16px rgba(255,140,40,0.35); }
+.dmg { font-family: 'Gowun Batang', serif; }
+.dmg.heavy { font-size: 28px; }
+.dmg.crit { font-size: 36px; color: #ffd24a; text-shadow: 0 0 10px #ff8a2a, 0 2px 3px #000; }
+.dmg.callout { font-size: 18px; color: #9fe0ff; font-weight: 800; letter-spacing: 1px; }
+.dmg.callout.counter { color: #5ab8ff; font-size: 26px; }
+.dmg.callout.groggy { color: #ffe08a; font-size: 26px; }
+#boss-alert { position: fixed; top: 18%; left: 50%; transform: translateX(-50%); font-family: 'Gowun Batang', serif; font-size: 24px; font-weight: 700; color: #ffb39a; text-shadow: 0 0 12px #ff3a2a, 0 2px 3px #000; pointer-events: none; z-index: 5; text-align: center; }
+#boss-alert .timer { display: block; font-size: 15px; color: #fff3d6; }
+
+/* ───── 상점 · 소지품 격자 ───── */
+#inventory { position: absolute; left: auto; right: 280px; top: 16px; width: 300px; }
+#shop { position: absolute; left: 50%; top: 14%; transform: translateX(-50%); width: 330px; max-height: 62vh; display: flex; flex-direction: column; z-index: 8; }
+#shop .rows { overflow-y: auto; flex: 1; }
+.qt-title .x { float: right; cursor: pointer; opacity: 0.7; }
+.eqrow { display: flex; gap: 6px; margin: 6px 0; }
+.eq { flex: 1; text-align: center; background: rgba(0,0,0,0.3); border: 1px dashed rgba(232,200,122,0.4); border-radius: 6px; padding: 4px; cursor: pointer; }
+.eq small { display: block; font-size: 10px; opacity: 0.7; }
+.stats { font-size: 11px; opacity: 0.85; margin-bottom: 6px; }
+.grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+.cell { position: relative; aspect-ratio: 1; background: rgba(0,0,0,0.35); border: 1px solid rgba(232,200,122,0.25); border-radius: 6px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.cell:hover, .row:hover, .eq:hover { border-color: #ffd27a; }
+.cell b { position: absolute; right: 3px; bottom: 1px; font-size: 10px; text-shadow: 0 1px 2px #000; }
+.ico { width: 38px; height: 38px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; font-family: var(--serif); font-weight: 700; color: #1a1010; font-size: 15px; }
+.ico.empty { background: rgba(255,255,255,0.05); }
+.row .ico { width: 30px; height: 30px; font-size: 12px; }
+.tabs { display: flex; gap: 6px; margin: 6px 0; }
+.tabs span { flex: 1; text-align: center; padding: 3px; border-radius: 6px; background: rgba(255,255,255,0.08); cursor: pointer; }
+.tabs span.on { background: #7a4b2a; color: #ffe6b0; }
+.row { display: flex; align-items: center; gap: 8px; padding: 3px 4px; border: 1px solid transparent; border-radius: 6px; cursor: pointer; font-size: 13px; }
+.row .nm { flex: 1; } .row .pr { color: #ffe39a; }
+.row.poor .pr { color: #ff9a80; } .row.other .nm { opacity: 0.55; }
+#itemtip { position: fixed; z-index: 30; max-width: 260px; background: var(--paper); color: var(--ink); font-size: 12px; line-height: 1.5; padding: 8px 10px; border-radius: 8px; pointer-events: none; box-shadow: 0 6px 20px rgba(0,0,0,0.4); }
+#itemtip .st { color: #2a7a3a; font-weight: 600; } #itemtip .bad { color: #b03a2a; }
+/* ───── 캐릭터 생성: 컨셉아트 카드 + 턴테이블 ───── */
+.choice-list.classes .choice { min-height: 150px; background-size: cover; background-position: center top; text-shadow: 0 1px 3px #000; }
+.choice-list.classes .choice::before { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(20,12,8,0.15), rgba(20,12,8,0.85) 60%); border-radius: 8px; z-index: -1; }
+.create-body { display: flex; gap: 14px; }
+.create-body > div:first-child { flex: 1; min-width: 0; }
+#turntable { width: 230px; height: 300px; border-radius: 10px; background: radial-gradient(ellipse at 50% 70%, rgba(255,200,120,0.25), rgba(0,0,0,0.3)); position: relative; flex-shrink: 0; align-self: center; }
+#turntable canvas { width: 100%; height: 100%; display: block; }
+#turntable .cap { position: absolute; bottom: 6px; left: 0; right: 0; text-align: center; font-size: 11px; opacity: 0.7; }

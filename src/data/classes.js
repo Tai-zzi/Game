@@ -14,7 +14,7 @@ export const CLASSES = {
       rule: '방패로 정면 공격을 받으면 축적 → 아군 방호(호위 교대·성벽 전개)와 반격에 소비. 비전투 시 감소.' },
     base: { maxHp: 190, atk: 10, def: 6, moveSpeed: 5.0, critChance: 0.05 }, // 검증 전 예시
     perLevel: { maxHp: 30, atk: 1.8, def: 1.4 },
-    skills: { basic: 'g_thrust', q: 'g_shield', w: 'g_escort', e: 'g_wall', dodge: 'dodge' },
+    skills: { basic: 'g_basic', q: 'g_shield', w: 'g_escort', e: 'g_wall', r: 'g_parry', a: 'g_rush', s: 'g_chain', d: 'g_taunt', f: 'g_release', ult: 'g_ult', dodge: 'dodge' },
   },
   archer: {
     id: 'archer', name: '매듭궁수', role: '원거리 공격', modelId: 'player_archer',
@@ -25,7 +25,7 @@ export const CLASSES = {
       rule: '표식 화살로 적에게 표식(대상당 최대 3) → 연결 사격이 표식을 소모해 추가 피해. 표식은 10초 뒤 사라진다.' },
     base: { maxHp: 135, atk: 13, def: 3, moveSpeed: 5.4, critChance: 0.12 },
     perLevel: { maxHp: 20, atk: 2.6, def: 0.7 },
-    skills: { basic: 'a_shot', q: 'a_mark', w: 'a_link', e: 'a_knotstep', dodge: 'dodge' },
+    skills: { basic: 'a_basic', q: 'a_mark', w: 'a_link', e: 'a_knotstep', r: 'a_pierce', a: 'a_post', s: 'a_volley', d: 'a_backshot', f: 'a_rain', ult: 'a_ult', dodge: 'dodge' },
   },
   elementalist: {
     id: 'elementalist', name: '원소직조사', role: '마법 공격', modelId: 'player_elementalist',
@@ -36,7 +36,7 @@ export const CLASSES = {
       rule: '불씨·서리선이 원소식 칸(최대 3)을 채움 → 완성 문양이 모두 소모. 같은 원소 연속은 집중 피해, 다른 원소 조합은 범위·제어. 8초간 입력이 없으면 흩어진다(자폭 없음).' },
     base: { maxHp: 125, atk: 14, def: 2.5, moveSpeed: 5.2, critChance: 0.08 },
     perLevel: { maxHp: 18, atk: 2.8, def: 0.6 },
-    skills: { basic: 'e_bolt', q: 'e_ember', w: 'e_frost', e: 'e_complete', dodge: 'dodge' },
+    skills: { basic: 'e_basic', q: 'e_ember', w: 'e_frost', e: 'e_complete', r: 'e_firewall', a: 'e_crystal', s: 'e_beam', d: 'e_leap', f: 'e_cycle', ult: 'e_ult', dodge: 'dodge' },
   },
   dyer: {
     id: 'dyer', name: '생명염색사', role: '회복', modelId: 'player_dyer',
@@ -47,7 +47,7 @@ export const CLASSES = {
       rule: '회복·보호 기술이 안료를 소모. 사용한 안료는 서서히 재생(비전투 시 2배). 바닥나면 회복 기술을 쓸 수 없다.' },
     base: { maxHp: 145, atk: 9, def: 3.5, moveSpeed: 5.3, critChance: 0.06 },
     perLevel: { maxHp: 22, atk: 1.7, def: 0.9 },
-    skills: { basic: 'd_tap', q: 'd_green', w: 'd_spread', e: 'd_bleach', dodge: 'dodge' },
+    skills: { basic: 'd_basic', q: 'd_green', w: 'd_spread', e: 'd_bleach', r: 'd_shield', a: 'd_pool', s: 'd_needle', d: 'd_suture', f: 'd_burst', ult: 'd_ult', dodge: 'dodge' },
   },
 };
 

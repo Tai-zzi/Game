@@ -68,19 +68,13 @@ export function buildDialog(game, p, npcId, page = 'main') {
       return { ...base, lines, options: opts };
     }
     case 'merchant': {
-      if (page === 'shop') {
-        const tb = p.inventory.thread_ball || 0;
-        return { ...base, lines: [`소지금 ${p.gold}골드. 목재 판 ${ITEMS.lumber.price}골드, 쇠 죔쇠 ${ITEMS.clamp.price}골드. 실뭉치는 개당 ${ITEMS.thread_ball.sell}골드에 사요.`],
-          options: [{ label: '목재 판 1개 산다', action: { type: 'buy', item: 'lumber' }, page: 'shop' }, { label: '쇠 죔쇠 1개 산다', action: { type: 'buy', item: 'clamp' }, page: 'shop' },
-            ...(tb ? [{ label: `실뭉치 ${tb}개 모두 판다`, action: { type: 'sell', item: 'thread_ball', count: tb }, page: 'shop' }] : []), { label: '그만 본다', page: 'main', secondary: true }] };
-      }
       const lines = memo.length ? [memo[memo.length - 1]] : [...npc.greeting];
       const opts = [];
       const a = p.contracts.active;
       if (a?.id === 'repair' && C.step(p)?.type === 'deliver') opts.push({ label: `보강 부품 2개 납품 (공공 기여)`, action: { type: 'deliver', mode: 'contribute' } });
       if ((p.inventory.brace || 0) > 0) opts.push({ label: `보강 부품 판매 (+${ITEMS.brace.sell}골드/개, 기여 없음)`, action: { type: 'deliver', mode: 'sell' }, secondary: true });
       opts.push(...contractOptions(game, p, 'repair'));
-      opts.push({ label: '물건을 사고판다', page: 'shop' });
+      opts.push({ label: '상점을 연다 (사고팔기)', action: { type: 'openShop' } });
       opts.push(close);
       return { ...base, lines, options: opts };
     }
@@ -107,4 +101,20 @@ function contractOptions(game, p, id) {
   }
   const label = p.contracts.done[id] === 'partial' ? `「${c.name}」 다시 맡기 (조건 보기)` : `「${c.name}」 계약 조건 보기`;
   return [{ label, page: `offer:${id}` }];
+}
+
+/** NPC 머리 위 표식: '?' 이 사람에게 할 일이 있음, '!' 맡을 수 있는 계약, '…' 이 사람의 계약 진행 중 */
+export function npcMarker(game, p, npcId) {
+  const C = game.contracts, a = p.contracts.active, step = C.step(p);
+  if (a) {
+    if (npcId === 'belo' && a.id === 'escort' && step?.type === 'escort' && !a.cartId) return '?';
+    if (npcId === 'merchant' && a.id === 'repair' && step?.type === 'deliver') return '?';
+    if (npcId === 'haila' && a.id === 'investigate' && step?.type === 'report') return '?';
+  }
+  const own = Object.values(CONTRACTS).find((c) => c.giver === npcId);
+  if (own) {
+    if (a?.id === own.id) return '…';
+    if (C.status(p, own.id) === 'available' && !a) return '!';
+  }
+  return '';
 }

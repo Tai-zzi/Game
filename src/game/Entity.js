@@ -1,6 +1,7 @@
 import { CLASSES, statsFor } from '../data/classes.js';
 import { MONSTERS } from '../data/monsters.js';
 import { NPCS } from '../data/npcs.js';
+import { ITEMS } from '../data/items.js';
 
 /**
  * 엔티티 = 순수 데이터 (컴포넌트 묶음). three.js 객체를 넣지 않는다 → 직렬화/네트워크 전송 가능.
@@ -28,6 +29,7 @@ export function createPlayer(id, { name, origin, classId, character }) {
   e.gold = character?.gold ?? 20;
   e.inventory = { ...(character?.inventory || {}) };
   e.affiliation = character?.affiliation ?? null; // null | 'league' | 'independent'
+  e.equipment = { weapon: null, armor: null, accessory: null, ...(character?.equipment || {}) };
   e.radius = 0.45;
   e.move = { target: null, dir: { x: 0, z: 0 } };
   e.targetId = null;
@@ -48,11 +50,15 @@ export function setClass(e, classId) {
   e.classId = classId;
   e.modelId = cls.modelId;
   e.skills = { ...cls.skills };
-  const ratio = e.stats?.maxHp > 1 ? e.hp / e.stats.maxHp : 1;
-  e.stats = statsFor(classId, e.level);
-  e.hp = Math.max(1, Math.round(e.stats.maxHp * ratio));
+  // 이 직업이 쓸 수 없는 장비는 소지품으로 돌려놓는다
+  if (e.equipment) for (const [slot, id] of Object.entries(e.equipment)) {
+    const it = id && ITEMS[id];
+    if (it?.classes && !it.classes.includes(classId)) { e.equipment[slot] = null; e.inventory[id] = (e.inventory[id] || 0) + 1; }
+  }
+  applyStats(e);
   e.res = { id: cls.resource.id, value: cls.resource.start, max: cls.resource.max, slots: [], lastGain: -99, counterUntil: -99 };
   e.cooldowns = {};
+  e.combo = {}; e.charging = null; e.holding = null; e.cast = null;
 }
 
 export function createMonster(id, monsterId, level, home, rng, tag = null) {
@@ -69,6 +75,13 @@ export function createMonster(id, monsterId, level, home, rng, tag = null) {
   e.home = { x: home.x, z: home.z };
   e.ai = { state: 'idle', timer: 1 + rng() * 3, targetId: null, wander: null, windup: 0, attackCd: 0 };
   e.marks = { n: 0, until: 0 }; // 매듭궁수 표식
+  e.tier = def.tier || 'normal';
+  e.scale = def.scale || 1;
+  e.superArmor = !!def.superArmor;
+  if (def.staggerMax) e.stagger = { value: def.staggerMax, max: def.staggerMax };
+  e.groggy = 0;
+  e.ai.cd = {};
+  e.ai.phaseDone = [];
   e.threat = new Map();
   return e;
 }
@@ -103,4 +116,17 @@ export function createInteractable(id, kind, data) {
   e.radius = kind === 'station' ? 1.0 : 0.7;
   e.readyAt = 0; // 채집 더미 재생성 시각
   return e;
+}
+
+/** 기본 능력치(직업·레벨) + 장비 보너스. 체력 비율은 유지 */
+export function applyStats(e) {
+  const ratio = e.stats?.maxHp > 1 ? e.hp / e.stats.maxHp : 1;
+  const st = statsFor(e.classId, e.level);
+  for (const id of Object.values(e.equipment || {})) {
+    const it = id && ITEMS[id];
+    if (it?.stats) for (const [k, v] of Object.entries(it.stats)) st[k] = (st[k] || 0) + v;
+  }
+  st.maxHp = Math.round(st.maxHp);
+  e.stats = st;
+  e.hp = Math.max(1, Math.min(st.maxHp, Math.round(st.maxHp * ratio)));
 }

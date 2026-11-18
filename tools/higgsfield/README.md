@@ -15,13 +15,13 @@
 ## 2. 사용법 (프로젝트 루트에서)
 ```bash
 node tools/higgsfield/generate.mjs --list                 # 프리셋 목록
-node tools/higgsfield/generate.mjs player_mender          # 1개 생성 → public/art/player_mender.png
+node tools/higgsfield/generate.mjs player_guardian          # 1개 생성 → public/art/player_guardian.png
 node tools/higgsfield/generate.mjs --all                  # 전체 프리셋 (순차 실행)
 node tools/higgsfield/generate.mjs --model higgsfield-ai/soul/standard --prompt "..." --param aspect_ratio=1:1 --out my_art
 node tools/higgsfield/generate.mjs --status <request_id>  # 상태 조회
 node tools/higgsfield/generate.mjs --cancel <request_id>  # 대기 중 요청 취소
 ```
-npm 스크립트: `npm run art -- player_mender`
+npm 스크립트: `npm run art -- player_guardian`
 
 - 실행 중 **Ctrl+C**를 누르면 진행 중인 요청에 실제 cancel 요청을 보냅니다.
 - 상태 확인은 2초에서 시작해 1.5배씩 늘리고 최대 10초 간격으로 반복합니다. 터미널 상태는 completed / failed / nsfw / canceled입니다.

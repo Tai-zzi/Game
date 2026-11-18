@@ -54,6 +54,8 @@ export const HARVEN = {
     { monster: 'unravel_sheep', x: -6, z: 50, radius: 10, count: 4 },
     { monster: 'unravel_wolf', x: 38, z: 52, radius: 9, count: 4, levelRange: [3, 4], tag: 'detour' },
     { monster: 'unravel_wolf', x: -52, z: -50, radius: 15, count: 6 },
+    { monster: 'tangled_alpha', x: -60, z: -60, radius: 2, count: 1, tag: 'elite' }, // 잿빛 숲 엘리트
+    { monster: 'bridge_keeper', x: 44, z: 22, radius: 1, count: 1, tag: 'boss' }, // 끊어진 다리 근처 중간 보스
   ],
   hollow: { x: -55, z: -55, radius: 36 },
 };

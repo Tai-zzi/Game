@@ -1,307 +1,340 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+import { MODEL_SPECS } from './ProceduralModels.js';
+import { RIG_FILES, MODEL_RIGS, STYLES, SKILL_ANIMS, BODY_PART } from '../data/animations.js';
+import { NPC_AI, PROP_AI } from '../data/aiAssets.js';
+import { AiAssets } from './AiAssets.js';
+import { addRim } from './shaders.js';
 
 /**
- * 캐릭터 모델.
- * 1) public/models/<modelId>.glb 가 있으면 GLB 사용 (애니메이션 idle/run/attack 자동 매핑)
- * 2) 없으면 절차적 저폴리 모델로 대체 (밥/스윙 절차적 애니메이션)
- * 절차적 모델은 즉시 표시되고, GLB가 로드되면 교체된다.
+ * 캐릭터 모델 — 세 가지 구현이 같은 상태 인터페이스를 쓴다.
+ *  1) rig    : 리그 GLB (public/models/<id>.glb 또는 KayKit) + AnimationMixer 크로스페이드
+ *  2) static : AI 생성 정적 메시 (NPC·소품) — 숨쉬기/흔들림 정도의 절차적 움직임
+ *  3) proc   : 절차적 계층 리그 + 키프레임 포즈 클립 (대체)
+ * 인터페이스: setLocomotion(idle|run|block) · playSkill(skillId,{windup,recovery,combo}) · hitReact(weight,knockdown)
+ *            die() · revive() · flash() · update(dt,t) · root · height
+ * 절차적 모델이 즉시 보이고, 더 나은 모델이 로드되면 교체된다.
  */
-const MODEL_SPECS = {
-  player_mender: { height: 1.8, build: buildMender },
-  npc_elder: { height: 1.75, build: buildElder },
-  mob_unravel_sheep: { height: 1.15, build: buildSheep, quadruped: true },
-  mob_unravel_wolf: { height: 1.25, build: buildWolf, quadruped: true },
-};
-
+const BASE = import.meta.env.BASE_URL;
+const gltfLoader = new GLTFLoader();
 const glbCache = new Map();
-const loader = new GLTFLoader();
 
-async function loadGLB(id) {
-  if (!glbCache.has(id)) {
-    glbCache.set(id, (async () => {
+async function fetchGLB(url) {
+  if (!glbCache.has(url)) {
+    glbCache.set(url, (async () => {
       try {
-        const res = await fetch(`${import.meta.env.BASE_URL}models/${id}.glb`);
+        const res = await fetch(BASE + url);
         if (!res.ok) return null;
         const buf = await res.arrayBuffer();
-        // 개발 서버는 없는 파일에 index.html 을 돌려줄 수 있으므로 매직 넘버 확인
         if (buf.byteLength < 12 || new DataView(buf).getUint32(0, true) !== 0x46546c67) return null;
-        const gltf = await loader.parseAsync(buf, `${import.meta.env.BASE_URL}models/`);
-        console.info(`[CharacterModel] GLB 로드: ${id}.glb`);
-        return gltf;
-      } catch (e) {
-        console.warn(`[CharacterModel] ${id}.glb 로드 실패 → 절차적 모델 사용`, e);
-        return null;
-      }
+        return await gltfLoader.parseAsync(buf, BASE + url.replace(/[^/]+$/, ''));
+      } catch (e) { console.warn('[CharacterModel] GLB 실패', url, e); return null; }
     })());
   }
-  return glbCache.get(id);
+  return glbCache.get(url);
+}
+
+let useRigs = true; // 저품질에서도 리그는 사용 (AI 정적 메시만 끔)
+export const ModelSettings = { set aiEnabled(v) { AiAssets.enabled = v; }, get aiEnabled() { return AiAssets.enabled; }, set rigs(v) { useRigs = v; } };
+
+const FLASH = new THREE.Color('#ffffff');
+const ZERO = {};
+const JOINTS = ['spineX', 'spineY', 'spineZ', 'headX', 'armLX', 'armLZ', 'foreLX', 'armRX', 'armRZ', 'foreRX', 'legLX', 'legRX', 'bodyY', 'bodyZ', 'tiltX', 'tiltZ'];
+
+/** 절차적 키프레임 클립: [시간비율(0~1, S=타격 시점), 포즈]. 'S' 는 타격 시점으로 치환된다 */
+const PROC_CLIPS = {
+  melee: [
+    [[0, ZERO], [0.8, { armRX: -2.3, armRZ: 0.3, foreRX: -0.8, spineY: 0.45, spineX: -0.1 }], [1, { armRX: -0.9, armRZ: -0.2, foreRX: -0.1, spineY: -0.5, spineX: 0.25, bodyZ: 0.3, legLX: -0.4, legRX: 0.3 }], [1.6, { armRX: -0.7, spineY: -0.3, spineX: 0.15, bodyZ: 0.15 }], [99, ZERO]],
+    [[0, ZERO], [0.8, { armRX: -1.2, armRZ: 1.2, spineY: 0.8 }], [1, { armRX: -1.3, armRZ: -0.6, spineY: -0.8, bodyZ: 0.3 }], [1.6, { armRZ: -0.4, spineY: -0.5 }], [99, ZERO]],
+    [[0, ZERO], [0.8, { armRX: -0.6, foreRX: -1.6, spineY: 0.3, bodyZ: -0.15 }], [1, { armRX: -1.6, foreRX: 0, spineY: -0.2, bodyZ: 0.5, legLX: -0.6, legRX: 0.4 }], [1.7, { armRX: -1.4, bodyZ: 0.3 }], [99, ZERO]],
+  ],
+  shoot: [[0, ZERO], [0.85, { armLX: -1.55, armRX: -1.45, foreRX: -0.9, spineY: 0.6 }], [1, { armLX: -1.55, armRX: -1.2, foreRX: 0, spineY: 0.6, spineX: -0.12 }], [1.5, { armLX: -1.4, armRX: -1.0, spineY: 0.4 }], [99, ZERO]],
+  cast: [[0, ZERO], [0.85, { armRX: -2.7, armLX: -2.5, spineX: -0.2, bodyY: 0.05 }], [1, { armRX: -1.5, armLX: -1.4, spineX: 0.25, bodyZ: 0.15 }], [1.6, { armRX: -1.2, armLX: -1.0, spineX: 0.1 }], [99, ZERO]],
+  use: [[0, ZERO], [0.8, { armRX: -1.3, foreRX: -1.0 }], [1, { armRX: -1.6, foreRX: -0.2, armLX: -1.0 }], [99, ZERO]],
+  block: [[0, ZERO], [1, { armLX: -1.35, armLZ: 0.35, foreLX: -0.6, spineX: 0.15, bodyY: -0.08 }], [99, { armLX: -1.35, armLZ: 0.35, foreLX: -0.6, spineX: 0.15, bodyY: -0.08 }]],
+  dodge: [[0, ZERO], [0.15, { bodyY: -0.3, tiltX: 0.8 }], [0.6, { bodyY: -0.35, tiltX: 4.5 }], [1, { tiltX: 6.283 }], [99, { tiltX: 6.283 }]],
+  lunge: [[0, ZERO], [0.85, { bodyZ: -0.2, tiltX: 0.2 }], [1, { bodyZ: 0.55, tiltX: -0.25 }], [1.6, { bodyZ: 0.2 }], [99, ZERO]],
+};
+const BLOCK_POSE = PROC_CLIPS.block[1][1];
+
+function samplePose(keys, u, out) {
+  let i = 0;
+  while (i < keys.length - 2 && keys[i + 1][0] <= u) i++;
+  const [t0, p0] = keys[i], [t1, p1] = keys[Math.min(i + 1, keys.length - 1)];
+  const k = t1 > t0 ? Math.min(1, Math.max(0, (u - t0) / (t1 - t0))) : 1;
+  const e = k * k * (3 - 2 * k);
+  for (const j of JOINTS) out[j] = (p0[j] || 0) + ((p1[j] || 0) - (p0[j] || 0)) * e;
+  return out;
 }
 
 export class CharacterModel {
-  constructor(modelId) {
+  /** @param {string} modelId  @param {{ npcId?: string }} opts */
+  constructor(modelId, opts = {}) {
     this.modelId = modelId;
-    this.spec = MODEL_SPECS[modelId] || MODEL_SPECS.player_mender;
+    this.spec = MODEL_SPECS[modelId] || MODEL_SPECS.player_guardian;
     this.root = new THREE.Group();
     this.body = new THREE.Group();
     this.root.add(this.body);
-    this.parts = {};
-    this.state = 'idle';
-    this.actionT = -1; // 공격 동작 진행 (0..1), -1 = 없음
-    this.flashT = 0;
+    this.kind = 'proc';
+    this.loco = 'idle';
+    this.action = null; // { start, strikeAt, end, clip|keys }
+    this.hit = 0; this.squash = 0; this.flashT = 0; this.dead = false; this.downT = 0;
     this.phase = Math.random() * 10;
-    this.mixer = null;
-    this.actions = {};
+    this.pose = Object.fromEntries(JOINTS.map((j) => [j, 0]));
+    this.target = { ...this.pose };
+    this.clock = 0;
     this.parts = this.spec.build(this.body);
     this.collectMaterials();
-    loadGLB(modelId).then((g) => { if (g && !this.disposed) this.useGLB(g); });
+    this.upgrade(opts);
   }
 
   get height() { return this.spec.height; }
 
+  async upgrade(opts) {
+    // 1) 직접 넣은 GLB (Higgsfield 등) 2) KayKit 리그 3) AI 정적 메시(NPC·소품)
+    const own = await fetchGLB(`models/${this.modelId}.glb`);
+    if (this.disposed) return;
+    if (own) return this.useGLB(own);
+    const rig = MODEL_RIGS[this.modelId];
+    if (rig && useRigs) {
+      const g = await fetchGLB(RIG_FILES[rig.rig]);
+      if (this.disposed) return;
+      if (g) return this.useGLB(g, rig);
+    }
+    const npc = opts.npcId && NPC_AI[opts.npcId];
+    const aiIds = npc ? npc.ids : PROP_AI[this.modelId] ? [PROP_AI[this.modelId]] : null;
+    if (aiIds && !rig) {
+      const r = await AiAssets.first(aiIds, { tint: npc && aiIds.indexOf(aiIds[0]) === 0 ? null : npc?.tint });
+      if (this.disposed || !r) return;
+      // 대역(클래스 모델)일 때만 색조
+      if (npc && r.id !== npc.ids[0]) r.obj.traverse((o) => { if (o.isMesh && o.material.color) o.material.color.multiply(new THREE.Color(npc.tint)); });
+      this.useStatic(r.obj);
+    }
+  }
+
   collectMaterials() {
     this.mats = [];
     this.body.traverse((o) => {
-      if (o.isMesh) {
-        o.castShadow = true;
-        const ms = Array.isArray(o.material) ? o.material : [o.material];
-        for (const m of ms) if (m.emissive && !m.userData.glow) { m.userData.baseEmissive = m.emissive.clone(); this.mats.push(m); }
+      if (!o.isMesh) return;
+      o.castShadow = true;
+      const ms = Array.isArray(o.material) ? o.material : [o.material];
+      for (const m of ms) {
+        if (m.isMeshStandardMaterial) addRim(m, '#ffe2b0', this.spec.prop ? 0.12 : 0.3);
+        if (m.emissive && !m.userData.glow) { m.userData.baseEmissive = m.emissive.clone(); this.mats.push(m); }
       }
     });
   }
 
-  useGLB(gltf) {
+  useStatic(obj) {
+    this.body.clear();
+    this.body.position.set(0, 0, 0);
+    this.body.add(obj);
+    this.kind = 'static';
+    this.parts = {};
+    this.collectMaterials();
+  }
+
+  useGLB(gltf, rig = null) {
     const scene = SkeletonUtils.clone(gltf.scene);
     scene.traverse((o) => {
-      if (o.isMesh) {
-        o.material = Array.isArray(o.material) ? o.material.map((m) => m.clone()) : o.material.clone();
-        o.castShadow = true; o.receiveShadow = true;
-      }
+      if (!o.isMesh) return;
+      if (rig) o.visible = BODY_PART.test(o.name) || rig.show.includes(o.name) || rig.show.includes(o.parent?.name);
+      o.material = Array.isArray(o.material) ? o.material.map((m) => m.clone()) : o.material.clone();
+      if (rig?.tint && o.material.color) o.material.color.multiply(new THREE.Color(rig.tint));
+      o.castShadow = true; o.receiveShadow = true;
+      o.frustumCulled = false; // 스킨 메시 경계상자 문제 회피
     });
-    // 키 정규화 + 발을 원점에
     const box = new THREE.Box3().setFromObject(scene);
     const size = box.getSize(new THREE.Vector3());
-    const s = size.y > 0 ? this.spec.height / size.y : 1;
-    scene.scale.setScalar(s);
+    scene.scale.setScalar(size.y > 0 ? this.spec.height / size.y : 1);
     box.setFromObject(scene);
     const c = box.getCenter(new THREE.Vector3());
     scene.position.set(-c.x, -box.min.y, -c.z);
     this.body.clear();
+    this.body.position.set(0, 0, 0); this.body.rotation.set(0, 0, 0);
     this.body.add(scene);
     this.parts = {};
     this.collectMaterials();
-    if (gltf.animations?.length) {
-      this.mixer = new THREE.AnimationMixer(scene);
-      const find = (...keys) => gltf.animations.find((a) => keys.some((k) => a.name.toLowerCase().includes(k)));
-      const map = { idle: find('idle'), run: find('run', 'walk'), attack: find('attack', 'slash', 'hit') };
-      for (const [k, clip] of Object.entries(map)) if (clip) this.actions[k] = this.mixer.clipAction(clip);
-      if (this.actions.attack) { this.actions.attack.setLoop(THREE.LoopOnce); this.actions.attack.clampWhenFinished = false; }
-      this.current = null;
-      this.playLoop(this.state);
-    }
+    this.mixer = new THREE.AnimationMixer(scene);
+    this.clips = Object.fromEntries(gltf.animations.map((a) => [a.name, a]));
+    this.style = STYLES[rig?.style] || STYLES.swordShield;
+    this.kind = 'rig';
+    this.current = null;
+    this.playLoop(this.loco);
   }
 
-  playLoop(name) {
-    const a = this.actions[name] || this.actions.idle;
+  clipAction(name) { const c = this.clips?.[name]; return c ? this.mixer.clipAction(c) : null; }
+
+  playLoop(state) {
+    if (this.kind !== 'rig' || this.dead) return;
+    const name = this.style[state] || this.style.idle;
+    const a = this.clipAction(name) || this.clipAction(this.style.idle);
     if (!a || this.current === a) return;
-    a.reset().fadeIn(0.18).play();
+    a.reset().setEffectiveTimeScale(1).setEffectiveWeight(1).setLoop(THREE.LoopRepeat).fadeIn(0.18).play();
     if (this.current) this.current.fadeOut(0.18);
     this.current = a;
   }
 
-  setState(state) {
-    if (state === this.state) return;
-    this.state = state;
-    if (this.mixer) this.playLoop(state);
+  setLocomotion(state) {
+    if (state === this.loco) return;
+    this.loco = state;
+    if (!this.action) this.playLoop(state);
   }
 
-  triggerAttack() {
-    this.actionT = 0;
-    const a = this.actions.attack;
-    if (a) { a.reset().setEffectiveWeight(1).fadeIn(0.05).play(); }
+  /**
+   * 기술 동작: 예비 동작(windup) 끝에 타격 프레임이 오도록 재생 속도를 맞춘다.
+   * combo: 연속 공격 단계(0,1,2)
+   */
+  playSkill(skillId, { windup = 0.2, recovery = 0.2, combo = 0 } = {}) {
+    if (this.dead) return;
+    const map = SKILL_ANIMS[skillId] || SKILL_ANIMS.mob_attack;
+    const now = this.clock;
+    const dur = map.duration || windup + recovery;
+    this.action = { start: now, strikeAt: now + (windup || dur * 0.4), end: now + Math.max(dur, windup + recovery) + 0.12, proc: map.proc || 'melee', combo, windup: windup || dur * 0.4 };
+    if (this.kind === 'rig') {
+      const name = map.combo ? this.style.combo[combo % this.style.combo.length] : map.clip;
+      const a = this.clipAction(name);
+      if (!a) return;
+      const ratio = Array.isArray(map.strike) ? map.strike[combo % map.strike.length] : map.strike;
+      const len = a.getClip().duration;
+      const ts = ratio > 0 && windup > 0 ? (len * ratio) / windup : len / (map.duration || dur);
+      a.reset().setLoop(THREE.LoopOnce, 1).setEffectiveWeight(1);
+      a.clampWhenFinished = true;
+      a.setEffectiveTimeScale(Math.min(4, Math.max(0.4, ts)));
+      a.fadeIn(0.06).play();
+      if (this.current && this.current !== a) this.current.fadeOut(0.08);
+      this.current = a;
+    }
+  }
+
+  hitReact(weight = 'light', knockdown = false) {
+    this.flashT = 1;
+    this.squash = weight === 'heavy' ? 1 : weight === 'medium' ? 0.7 : 0.45;
+    this.hit = 1;
+    if (knockdown) this.downT = 1.0;
+    if (this.kind === 'rig' && !this.action && !this.dead) {
+      const list = this.style.hit;
+      const a = this.clipAction(list[(Math.random() * list.length) | 0]);
+      if (a) {
+        a.reset().setLoop(THREE.LoopOnce, 1).setEffectiveTimeScale(1.5).fadeIn(0.05).play();
+        a.clampWhenFinished = false;
+        if (this.current && this.current !== a) this.current.fadeOut(0.05);
+        this.current = a;
+        this.action = { start: this.clock, strikeAt: this.clock, end: this.clock + 0.35, proc: 'hit' };
+      }
+    }
   }
 
   flash() { this.flashT = 1; }
 
-  update(dt, t) {
-    if (this.mixer) this.mixer.update(dt);
-    if (this.actionT >= 0) { this.actionT += dt / 0.32; if (this.actionT >= 1) this.actionT = -1; }
-    if (!this.mixer) this.animateProcedural(dt, t + this.phase);
-    if (this.flashT > 0) {
-      this.flashT = Math.max(0, this.flashT - dt * 5);
-      for (const m of this.mats) m.emissive.copy(m.userData.baseEmissive).lerp(FLASH, this.flashT);
+  die() {
+    if (this.dead) return;
+    this.dead = true;
+    this.action = null;
+    if (this.kind === 'rig') {
+      const a = this.clipAction(this.style.death);
+      if (a) { a.reset().setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = true; a.fadeIn(0.1).play(); if (this.current) this.current.fadeOut(0.1); this.current = a; }
     }
-    const p = this.parts;
-    if (p.glow) p.glow.rotation.y += dt * 1.5;
+  }
+
+  revive() {
+    this.dead = false; this.downT = 0;
+    this.body.rotation.set(0, 0, 0); this.body.position.set(0, 0, 0);
+    this.current = null;
+    if (this.mixer) this.mixer.stopAllAction();
+    this.playLoop(this.loco);
+  }
+
+  update(dt, t) {
+    this.clock += dt;
+    if (this.action && this.clock >= this.action.end) {
+      this.action = null;
+      if (this.kind === 'rig' && !this.dead) { this.current = null; this.playLoop(this.loco); }
+    }
+    if (this.mixer) this.mixer.update(dt);
+    if (this.kind === 'proc') this.animateProcedural(dt, t + this.phase);
+    else if (this.kind === 'static') this.animateStatic(dt, t + this.phase);
+    // 피격 찌그러짐(squash) + 섬광
+    if (this.squash > 0) {
+      this.squash = Math.max(0, this.squash - dt * 6);
+      const s = this.squash * 0.16;
+      this.root.scale.set(this.root.scale.x * (1 + s * 0.5) / (1 + (this.lastS || 0) * 0.5), this.root.scale.y * (1 - s) / (1 - (this.lastS || 0)), this.root.scale.z * (1 + s * 0.5) / (1 + (this.lastS || 0) * 0.5));
+      this.lastS = s;
+    } else if (this.lastS) {
+      this.root.scale.set(this.root.scale.x / (1 + this.lastS * 0.5), this.root.scale.y / (1 - this.lastS), this.root.scale.z / (1 + this.lastS * 0.5));
+      this.lastS = 0;
+    }
+    if (this.flashT > 0) {
+      this.flashT = Math.max(0, this.flashT - dt * 7);
+      for (const m of this.mats) m.emissive.copy(m.userData.baseEmissive).lerp(FLASH, this.flashT * 0.9);
+    }
+    if (this.parts.glow) this.parts.glow.rotation.y += dt * 1.5;
+  }
+
+  animateStatic(dt, t) {
+    if (this.spec.prop) return;
+    // 숨쉬기 (세로 ±1%) + 피격 시 뒤로 젖힘
+    this.body.scale.y = 1 + Math.sin(t * 1.6) * 0.01;
+    this.hit = Math.max(0, this.hit - dt * 4);
+    this.body.rotation.x = -this.hit * 0.15;
+    if (this.dead) this.body.rotation.x = Math.max(-1.5, this.body.rotation.x - dt * 4);
   }
 
   animateProcedural(dt, t) {
-    const p = this.parts, run = this.state === 'run';
-    const a = this.actionT >= 0 ? Math.sin(this.actionT * Math.PI) : 0;
+    if (this.spec.prop) return;
+    const p = this.parts, run = this.loco === 'run';
+    const tgt = this.target;
+    for (const j of JOINTS) tgt[j] = 0;
+    // 기본 이동 상태
     if (this.spec.quadruped) {
-      const f = run ? 12 : 0;
-      const sw = run ? Math.sin(t * f) * 0.7 : 0;
-      if (p.legs) { p.legs[0].rotation.x = sw; p.legs[3].rotation.x = sw; p.legs[1].rotation.x = -sw; p.legs[2].rotation.x = -sw; }
-      this.body.position.y = run ? Math.abs(Math.sin(t * f)) * 0.08 : Math.sin(t * 2) * 0.015;
-      this.body.position.z = a * 0.45;
-      this.body.rotation.x = -a * 0.25;
-      if (p.head) p.head.rotation.x = Math.sin(t * 1.3) * 0.08 + a * 0.4;
-      if (p.tail) p.tail.rotation.y = Math.sin(t * (run ? 14 : 3)) * 0.4;
+      const f = run ? 12 : 0, sw = run ? Math.sin(t * f) * 0.7 : 0;
+      tgt.legLX = sw; tgt.legRX = -sw;
+      tgt.bodyY = run ? Math.abs(Math.sin(t * f)) * 0.08 : Math.sin(t * 2) * 0.015;
     } else {
-      const f = run ? 10 : 0;
-      const sw = run ? Math.sin(t * f) * 0.8 : 0;
-      if (p.legL) { p.legL.rotation.x = sw; p.legR.rotation.x = -sw; }
-      if (p.armL) p.armL.rotation.x = -sw * 0.7;
-      if (p.armR) {
-        // 공격: 위로 들었다가 내려 찌르기
-        const atk = this.actionT >= 0 ? (this.actionT < 0.35 ? -this.actionT / 0.35 * 2.4 : -2.4 + (this.actionT - 0.35) / 0.65 * 1.5) : sw * 0.7;
-        p.armR.rotation.x = atk;
-      }
-      this.body.position.y = run ? Math.abs(Math.sin(t * f)) * 0.07 : Math.sin(t * 1.8) * 0.02;
-      this.body.rotation.x = run ? 0.08 : 0;
-      this.body.rotation.y = a * 0.35;
-      if (p.cape) p.cape.rotation.x = 0.12 + (run ? 0.35 + Math.sin(t * f) * 0.08 : Math.sin(t * 1.5) * 0.04);
-      if (p.head) p.head.rotation.y = Math.sin(t * 0.5) * 0.12;
+      const f = run ? 10 : 0, sw = run ? Math.sin(t * f) * 0.8 : 0;
+      tgt.legLX = sw; tgt.legRX = -sw; tgt.armLX = -sw * 0.7; tgt.armRX = sw * 0.7;
+      tgt.foreLX = -0.25; tgt.foreRX = -0.25;
+      tgt.bodyY = run ? Math.abs(Math.sin(t * f)) * 0.07 : Math.sin(t * 1.8) * 0.02;
+      tgt.spineX = run ? 0.12 : 0;
+      if (this.loco === 'block') for (const [k, v] of Object.entries(BLOCK_POSE)) tgt[k] = v;
+      for (const [k, v] of Object.entries(p.rest || {})) tgt[k] += v;
     }
+    // 동작 클립 (예비 동작 → 타격 → 회수)
+    if (this.action && this.action.proc !== 'hit') {
+      const a = this.action;
+      let keys = PROC_CLIPS[this.spec.quadruped ? 'lunge' : a.proc] || PROC_CLIPS.melee;
+      if (Array.isArray(keys[0][0])) keys = keys[a.combo % keys.length];
+      const u = (this.clock - a.start) / Math.max(0.05, a.windup); // 1 = 타격 순간
+      const pose = samplePose(keys, a.proc === 'dodge' ? (this.clock - a.start) / Math.max(0.1, a.end - a.start - 0.12) : u, {});
+      for (const j of JOINTS) tgt[j] += pose[j];
+    }
+    // 피격 반응 (가산)
+    if (this.hit > 0) { tgt.spineX -= this.hit * 0.35; tgt.headX -= this.hit * 0.3; tgt.bodyZ -= this.hit * 0.12; this.hit = Math.max(0, this.hit - dt * 5); }
+    // 넘어짐 / 사망
+    if (this.downT > 0) { this.downT -= dt; tgt.tiltZ += Math.min(1, this.downT * 3) * 1.4; tgt.bodyY -= 0.3 * Math.min(1, this.downT * 3); }
+    if (this.dead) { if (this.spec.quadruped) tgt.tiltZ = 1.5; else { tgt.tiltX = -1.45; tgt.bodyY = 0.1; } }
+    // 부드럽게 따라가기 (크로스페이드 효과). 구르기 회전은 즉시
+    const k = 1 - Math.exp(-dt * 20);
+    for (const j of JOINTS) this.pose[j] += (tgt[j] - this.pose[j]) * (j === 'tiltX' && this.action?.proc === 'dodge' ? 1 : k);
+    const q = this.pose;
+    if (p.spine) p.spine.rotation.set(q.spineX, q.spineY, q.spineZ);
+    if (p.head) p.head.rotation.x = q.headX + (this.spec.quadruped ? Math.sin(t * 1.3) * 0.08 : 0);
+    if (p.armL) p.armL.rotation.set(q.armLX, 0, q.armLZ);
+    if (p.armR) p.armR.rotation.set(q.armRX, 0, q.armRZ);
+    if (p.foreL) p.foreL.rotation.x = q.foreLX;
+    if (p.foreR) p.foreR.rotation.x = q.foreRX;
+    if (p.legL) { p.legL.rotation.x = q.legLX; p.legR.rotation.x = q.legRX; }
+    if (p.legs) { p.legs[0].rotation.x = q.legLX; p.legs[3].rotation.x = q.legLX; p.legs[1].rotation.x = q.legRX; p.legs[2].rotation.x = q.legRX; }
+    if (p.tail) p.tail.rotation.y = Math.sin(t * (run ? 14 : 3)) * 0.4;
+    if (p.cape) p.cape.rotation.x = 0.12 + (run ? 0.35 + Math.sin(t * 10) * 0.08 : Math.sin(t * 1.5) * 0.04);
+    this.body.position.set(0, q.bodyY, q.bodyZ);
+    this.body.rotation.set(q.tiltX, 0, q.tiltZ);
   }
 
   dispose() {
     this.disposed = true;
-    this.root.traverse((o) => { if (o.isMesh) { o.geometry?.dispose(); } });
+    this.mixer?.stopAllAction();
+    this.root.traverse((o) => { if (o.isMesh && !o.isSkinnedMesh && this.kind === 'proc') o.geometry?.dispose(); });
   }
-}
-
-const FLASH = new THREE.Color('#ffffff');
-
-// ================= 절차적 모델 빌더 =================
-const std = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.85, ...extra });
-const glowMat = (color, opacity = 0.9) => {
-  const m = new THREE.MeshBasicMaterial({ color, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false });
-  m.userData.glow = true;
-  return m;
-};
-function mesh(geo, mat, x = 0, y = 0, z = 0) { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); return m; }
-function pivot(parent, x, y, z) { const g = new THREE.Group(); g.position.set(x, y, z); parent.add(g); return g; }
-
-/** 팔·몸에 감기는 빛나는 실 (나선) */
-function helixThread(radius, height, turns, color) {
-  const pts = [];
-  for (let i = 0; i <= 48; i++) {
-    const a = (i / 48) * turns * Math.PI * 2;
-    pts.push(new THREE.Vector3(Math.cos(a) * radius, (i / 48) * height - height / 2, Math.sin(a) * radius));
-  }
-  return new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 64, 0.018, 4), glowMat(color));
-}
-
-/** 몸에서 풀려나온 실 가닥 */
-function looseStrand(from, dir, len, color, seed) {
-  const pts = [];
-  for (let i = 0; i <= 6; i++) {
-    const k = i / 6;
-    pts.push(new THREE.Vector3(
-      from.x + dir.x * len * k + Math.sin(seed + k * 6) * 0.12 * k,
-      from.y + dir.y * len * k - k * k * 0.25,
-      from.z + dir.z * len * k + Math.cos(seed + k * 5) * 0.12 * k));
-  }
-  return new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 20, 0.02, 4), glowMat(color, 0.75));
-}
-
-function buildMender(root) {
-  const skin = std('#f1c9a2'), tunic = std('#3f6e8c'), pants = std('#4a3a2c'), apron = std('#dcc59a'), cape = std('#a8432f', { side: THREE.DoubleSide }), hair = std('#5a3a22'), leather = std('#6b4428');
-  const legL = pivot(root, -0.15, 0.85, 0), legR = pivot(root, 0.15, 0.85, 0);
-  for (const l of [legL, legR]) { l.add(mesh(new THREE.CapsuleGeometry(0.11, 0.55, 4, 8), pants, 0, -0.42, 0)); l.add(mesh(new THREE.BoxGeometry(0.2, 0.12, 0.3), leather, 0, -0.8, 0.04)); }
-  const torso = mesh(new THREE.CapsuleGeometry(0.26, 0.45, 4, 10), tunic, 0, 1.18, 0); torso.scale.z = 0.75; root.add(torso);
-  const ap = mesh(new THREE.BoxGeometry(0.42, 0.62, 0.04), apron, 0, 1.0, 0.2); ap.rotation.x = -0.08; root.add(ap);
-  const belt = mesh(new THREE.TorusGeometry(0.27, 0.035, 6, 16), leather, 0, 0.98, 0);
-  belt.rotation.x = Math.PI / 2; root.add(belt);
-  root.add(mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.12, 10), std('#e8b04a'), 0.24, 0.92, 0.12)); // 실패(스풀)
-  const head = pivot(root, 0, 1.62, 0);
-  head.add(mesh(new THREE.SphereGeometry(0.2, 14, 12), skin));
-  const h = mesh(new THREE.SphereGeometry(0.215, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.55), hair, 0, 0.03, -0.02); head.add(h);
-  head.add(mesh(new THREE.SphereGeometry(0.025, 6, 6), std('#2a1d14'), -0.07, 0.01, 0.18), mesh(new THREE.SphereGeometry(0.025, 6, 6), std('#2a1d14'), 0.07, 0.01, 0.18));
-  const capeP = pivot(root, 0, 1.48, -0.18);
-  const capeGeo = new THREE.PlaneGeometry(0.62, 0.95, 1, 4); capeGeo.translate(0, -0.47, 0);
-  capeP.add(mesh(capeGeo, cape));
-  capeP.add(mesh(new THREE.TorusGeometry(0.2, 0.04, 6, 12, Math.PI), cape, 0, 0.0, 0.12));
-  const armL = pivot(root, -0.36, 1.42, 0), armR = pivot(root, 0.36, 1.42, 0);
-  for (const a of [armL, armR]) {
-    a.add(mesh(new THREE.CapsuleGeometry(0.085, 0.45, 4, 8), tunic, 0, -0.27, 0));
-    a.add(mesh(new THREE.SphereGeometry(0.08, 8, 8), skin, 0, -0.56, 0));
-    const th = helixThread(0.13, 0.42, 3, '#ffd27a'); th.position.y = -0.3; a.add(th);
-  }
-  // 수선 바늘 (무기)
-  const needle = new THREE.Group();
-  needle.add(mesh(new THREE.CylinderGeometry(0.025, 0.012, 1.05, 8), std('#d9dde3', { metalness: 0.8, roughness: 0.3 }), 0, 0.5, 0));
-  needle.add(mesh(new THREE.TorusGeometry(0.045, 0.012, 6, 10), std('#d9dde3', { metalness: 0.8, roughness: 0.3 }), 0, -0.05, 0));
-  needle.position.set(0, -0.58, 0.05); needle.rotation.x = Math.PI / 2; armR.add(needle);
-  const glow = helixThread(0.42, 0.25, 1.2, '#ffe39a'); glow.position.y = 1.0; root.add(glow);
-  return { legL, legR, armL, armR, head, cape: capeP, glow };
-}
-
-function buildElder(root) {
-  const robe = std('#6b5b8a'), skin = std('#e6bf98'), beard = std('#eeeae0'), wood = std('#7a5634'), sash = std('#c9a14a');
-  const r = mesh(new THREE.CylinderGeometry(0.25, 0.48, 1.3, 10), robe, 0, 0.65, 0); root.add(r);
-  root.add(mesh(new THREE.CapsuleGeometry(0.25, 0.3, 4, 10), robe, 0, 1.3, -0.03));
-  const belt = mesh(new THREE.TorusGeometry(0.3, 0.04, 6, 14), sash, 0, 1.05, 0);
-  belt.rotation.x = Math.PI / 2; root.add(belt);
-  const head = pivot(root, 0, 1.6, 0.04);
-  head.add(mesh(new THREE.SphereGeometry(0.19, 14, 12), skin));
-  const b = mesh(new THREE.ConeGeometry(0.15, 0.45, 8), beard, 0, -0.24, 0.1); b.rotation.x = Math.PI + 0.25; head.add(b);
-  head.add(mesh(new THREE.SphereGeometry(0.235, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.6), robe, 0, 0.02, -0.03)); // 두건
-  const armL = pivot(root, -0.3, 1.38, 0), armR = pivot(root, 0.3, 1.38, 0);
-  for (const a of [armL, armR]) a.add(mesh(new THREE.CapsuleGeometry(0.09, 0.4, 4, 8), robe, 0, -0.25, 0.05));
-  armR.rotation.x = -0.5;
-  // 물렛가락 지팡이 + 빛나는 실
-  const staff = new THREE.Group();
-  staff.add(mesh(new THREE.CylinderGeometry(0.035, 0.04, 1.9, 6), wood, 0, 0, 0));
-  staff.add(mesh(new THREE.SphereGeometry(0.12, 10, 8), sash, 0, 0.95, 0));
-  const th = helixThread(0.14, 0.35, 4, '#ffd98a'); th.position.y = 0.95; staff.add(th);
-  staff.position.set(0.05, -0.45, 0.25); staff.rotation.x = 0.5; armR.add(staff);
-  return { armL, armR, head, glow: th };
-}
-
-function buildSheep(root) {
-  const wool = std('#f2ece0', { flatShading: true, roughness: 1 }), dark = std('#3b3330'), legM = std('#2f2926');
-  const bodyG = new THREE.Group(); bodyG.position.y = 0.62; root.add(bodyG);
-  const blobs = [[0, 0, 0, 0.42], [0.2, 0.08, 0.18, 0.3], [-0.2, 0.08, 0.15, 0.3], [0.18, 0.05, -0.22, 0.3], [-0.16, 0.12, -0.2, 0.28], [0, 0.22, 0, 0.3]];
-  for (const [x, y, z, r] of blobs) bodyG.add(mesh(new THREE.IcosahedronGeometry(r, 0), wool, x, y, z));
-  // 풀려버린 옆구리: 실 나선이 드러남
-  const coil = helixThread(0.28, 0.4, 5, '#ffd27a'); coil.rotation.z = Math.PI / 2; coil.position.set(0.05, 0.02, -0.38); bodyG.add(coil);
-  const head = pivot(root, 0, 0.78, 0.45);
-  head.add(mesh(new THREE.BoxGeometry(0.24, 0.26, 0.32), dark, 0, 0, 0.08));
-  head.add(mesh(new THREE.IcosahedronGeometry(0.16, 0), wool, 0, 0.16, 0));
-  const eye = glowMat('#cfe0ff');
-  head.add(mesh(new THREE.SphereGeometry(0.035, 6, 6), eye, -0.09, 0.04, 0.2), mesh(new THREE.SphereGeometry(0.035, 6, 6), eye, 0.09, 0.04, 0.2));
-  // 실로 된 뿔
-  for (const s of [-1, 1]) { const horn = helixThread(0.05, 0.18, 2, '#e8c87a'); horn.position.set(s * 0.15, 0.12, 0); horn.rotation.z = s * 1.0; head.add(horn); }
-  const legs = [];
-  for (const [x, z] of [[-0.2, 0.25], [0.2, 0.25], [-0.2, -0.25], [0.2, -0.25]]) {
-    const l = pivot(root, x, 0.42, z); l.add(mesh(new THREE.CylinderGeometry(0.05, 0.045, 0.42, 6), legM, 0, -0.21, 0)); legs.push(l);
-  }
-  for (let i = 0; i < 3; i++) root.add(looseStrand(new THREE.Vector3(0.1 * (i - 1), 0.75, -0.5), new THREE.Vector3(0.2 * (i - 1), -0.3, -1), 0.9, '#ffd98a', i * 2));
-  return { head, legs };
-}
-
-function buildWolf(root) {
-  const fur = std('#6f6a66', { flatShading: true }), dark = std('#3e3a38', { flatShading: true }), legM = std('#55504c');
-  const bodyG = new THREE.Group(); bodyG.position.y = 0.72; root.add(bodyG);
-  const torso = mesh(new THREE.CapsuleGeometry(0.28, 0.75, 4, 8), fur); torso.rotation.x = Math.PI / 2; bodyG.add(torso);
-  bodyG.add(mesh(new THREE.IcosahedronGeometry(0.34, 0), dark, 0, 0.08, 0.32));
-  // 풀려 비어버린 허리: 실 고리만 남음
-  for (let i = 0; i < 3; i++) { const ring = new THREE.Mesh(new THREE.TorusGeometry(0.27, 0.015, 4, 18), glowMat('#b8c8ff', 0.8)); ring.position.z = -0.15 - i * 0.14; bodyG.add(ring); }
-  const head = pivot(root, 0, 0.92, 0.62);
-  head.add(mesh(new THREE.BoxGeometry(0.3, 0.28, 0.3), fur, 0, 0, 0));
-  const snout = mesh(new THREE.ConeGeometry(0.12, 0.32, 4), dark, 0, -0.05, 0.28); snout.rotation.x = Math.PI / 2; snout.rotation.y = Math.PI / 4; head.add(snout);
-  for (const s of [-1, 1]) head.add(mesh(new THREE.ConeGeometry(0.06, 0.16, 4), dark, s * 0.1, 0.2, -0.05));
-  const eye = glowMat('#9fd0ff');
-  head.add(mesh(new THREE.SphereGeometry(0.03, 6, 6), eye, -0.08, 0.05, 0.15), mesh(new THREE.SphereGeometry(0.03, 6, 6), eye, 0.08, 0.05, 0.15));
-  const tail = pivot(root, 0, 0.82, -0.62);
-  const tm = mesh(new THREE.ConeGeometry(0.09, 0.55, 5), fur, 0, 0, -0.25); tm.rotation.x = -Math.PI / 2 - 0.4; tail.add(tm);
-  const legs = [];
-  for (const [x, z] of [[-0.17, 0.35], [0.17, 0.35], [-0.17, -0.35], [0.17, -0.35]]) {
-    const l = pivot(root, x, 0.55, z); l.add(mesh(new THREE.CylinderGeometry(0.06, 0.045, 0.55, 6), legM, 0, -0.27, 0)); legs.push(l);
-  }
-  for (let i = 0; i < 4; i++) root.add(looseStrand(new THREE.Vector3(0.12 * (i - 1.5), 0.8, -0.55), new THREE.Vector3(0.25 * (i - 1.5), -0.2, -1), 1.1, '#b8c8ff', i * 1.7));
-  return { head, legs, tail };
 }

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { HARVEN, heightAt, riverX } from '../data/zones.js';
 import { makeRng, smoothstep } from '../core/math.js';
+import { applySplat, addWind, makeWaterMaterial } from './shaders.js';
 
 /**
  * 하르벤 계곡의 시각 요소 전부. 로직과 공유하는 것은 zones.js 의 데이터/높이 함수뿐.
@@ -23,9 +24,11 @@ export class World {
     this.buildGrass();
     this.buildProps();
     this.buildLooseThreads();
+    this.buildBridge();
+    this.buildDepot();
   }
 
-  update(t, dt) { for (const f of this.animated) f(t, dt); }
+  update(t, dt) { if (this.windTime) this.windTime.value = t; for (const f of this.animated) f(t, dt); }
 
   // ---------------- 지형 ----------------
   buildTerrain() {
@@ -34,6 +37,7 @@ export class World {
     geo.rotateX(-Math.PI / 2);
     const pos = geo.attributes.position;
     const colors = new Float32Array(pos.count * 3);
+    const splat = new Float32Array(pos.count * 3); // (풀, 흙, 모래) 가중치
     const c = new THREE.Color();
     const grassA = new THREE.Color('#79a847'), grassB = new THREE.Color('#b0c45c'), hill = new THREE.Color('#9caf62');
     const sand = new THREE.Color('#d9c38e'), dirt = new THREE.Color('#c49a63'), ash = new THREE.Color('#8e8f86');
@@ -57,10 +61,15 @@ export class World {
       const hd = Math.hypot(x - hollow.x, z - hollow.z);
       c.lerp(ash, (1 - smoothstep(hollow.radius * 0.4, hollow.radius, hd)) * 0.75);
       colors.set([c.r, c.g, c.b], i * 3);
+      const wd = Math.max(1 - smoothstep(7, 11, vr), roadMask * 0.85), ws = 1 - smoothstep(5, 9, rd);
+      const wg = Math.max(0, 1 - wd - ws), sum = wg + wd + ws || 1;
+      splat.set([wg / sum, wd / sum, ws / sum], i * 3);
     }
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geo.setAttribute('aSplat', new THREE.BufferAttribute(splat, 3));
     geo.computeVertexNormals();
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.96, metalness: 0 });
+    applySplat(mat);
     this.terrain = new THREE.Mesh(geo, mat);
     this.terrain.receiveShadow = true;
     this.terrain.name = 'terrain';
@@ -83,30 +92,17 @@ export class World {
     geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
     geo.setIndex(idx);
     geo.computeVertexNormals();
-    // 실 결 같은 물결 텍스처
-    const cv = document.createElement('canvas'); cv.width = 128; cv.height = 256;
-    const g = cv.getContext('2d');
-    g.fillStyle = '#4e98ad'; g.fillRect(0, 0, 128, 256);
-    g.strokeStyle = 'rgba(230,248,255,0.35)'; g.lineWidth = 2;
-    for (let i = 0; i < 26; i++) {
-      const x0 = Math.random() * 128, y0 = Math.random() * 256, len = 20 + Math.random() * 40;
-      g.beginPath(); g.moveTo(x0, y0);
-      g.bezierCurveTo(x0 + 6, y0 + len * 0.3, x0 - 6, y0 + len * 0.6, x0 + 2, y0 + len); g.stroke();
-    }
-    const tex = new THREE.CanvasTexture(cv);
-    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-    tex.colorSpace = THREE.SRGBColorSpace;
-    const mat = new THREE.MeshStandardMaterial({ map: tex, transparent: true, opacity: 0.82, roughness: 0.2, metalness: 0.05, emissive: '#1d4a5a', emissiveIntensity: 0.25 });
+    const mat = makeWaterMaterial();
     const water = new THREE.Mesh(geo, mat);
-    water.receiveShadow = true;
     this.group.add(water);
-    this.animated.push((t, dt) => { tex.offset.y -= dt * 0.12; });
+    this.animated.push((t) => { mat.uniforms.uTime.value = t; });
 
-    // 징검돌
+    // 상류 여울 징검돌 (다리 상태와 무관하게 늘 건널 수 있음)
     const stoneMat = new THREE.MeshStandardMaterial({ color: '#a8a294', roughness: 0.9 });
     const stoneGeo = new THREE.CylinderGeometry(0.7, 0.85, 0.5, 7);
+    const fz = HARVEN.ford.z;
     for (let i = -3; i <= 3; i++) {
-      const z = 4 + Math.sin(i) * 0.6;
+      const z = fz + Math.sin(i) * 0.6;
       const s = new THREE.Mesh(stoneGeo, stoneMat);
       s.position.set(riverX(z) + i * 1.9, HARVEN.waterLevel + 0.05, z);
       s.rotation.y = i;
@@ -158,6 +154,7 @@ export class World {
       chim.position.set(h.w * 0.25, h.h + roofH * 0.6, -h.d * 0.2); g.add(chim);
       g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
       this.group.add(g);
+      (this.houseGroups ||= []).push({ g, h });
     }
   }
 
@@ -194,7 +191,7 @@ export class World {
       pts.push(x, 2.0, 0, x, H - 0.3, 0);
     }
     const lg = new THREE.BufferGeometry(); lg.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
-    const lmat = new THREE.LineBasicMaterial({ color: '#ffd98a', transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending });
+    const lmat = new THREE.LineBasicMaterial({ color: new THREE.Color('#ffd98a').multiplyScalar(2.5), transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending });
     g.add(new THREE.LineSegments(lg, lmat));
     // 씨실 북(셔틀)이 왕복한다
     const shuttle = new THREE.Mesh(new THREE.CapsuleGeometry(0.1, 0.5, 4, 8), new THREE.MeshStandardMaterial({ color: '#d9a35a', emissive: '#ff9e40', emissiveIntensity: 0.6 }));
@@ -203,6 +200,7 @@ export class World {
     glow.position.set(0, 2.6, 1.2); g.add(glow);
     g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
     this.group.add(g);
+    this.loomGroup = g;
     this.animated.push((t) => {
       lmat.opacity = 0.65 + 0.3 * Math.sin(t * 2.2);
       shuttle.position.set(Math.sin(t * 1.4) * (W / 2 - 0.5), 2.05, 0.05);
@@ -235,6 +233,7 @@ export class World {
     wheel.position.set(x, HARVEN.waterLevel + R - 0.6, z);
     wheel.traverse((o) => { if (o.isMesh) { o.castShadow = true; } });
     this.group.add(wheel);
+    this.wheelGroup = wheel;
     this.animated.push((t, dt) => { wheel.rotation.x -= dt * 0.7; });
   }
 
@@ -291,6 +290,7 @@ export class World {
     for (const h of HARVEN.houses) if (Math.abs(x - h.x) < h.w / 2 + 2 && Math.abs(z - h.z) < h.d / 2 + 2) return false;
     if (Math.abs(z - 3) < 4 && x > -20 && x < 40) return false;
     for (const s of HARVEN.spawns) if (Math.hypot(x - s.x, z - s.z) < s.radius * 0.8) return false;
+    for (const p of [...HARVEN.cartRoute, ...HARVEN.nodes, ...HARVEN.clues, HARVEN.depot]) if (Math.hypot(x - p.x, z - p.z) < 6) return false;
     return Math.hypot(x, z) < HARVEN.size / 2 - 4;
   }
 
@@ -310,7 +310,10 @@ export class World {
     const n = spots.length;
     const trunk = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.18, 0.3, 2.2, 6).translate(0, 1.1, 0), new THREE.MeshStandardMaterial({ color: '#6b4a2f', roughness: 1 }), n);
     const leafGeo = new THREE.IcosahedronGeometry(1.5, 0);
-    const leaves = new THREE.InstancedMesh(leafGeo, new THREE.MeshStandardMaterial({ roughness: 0.9, flatShading: true }), n * 2);
+    const leafMat = new THREE.MeshStandardMaterial({ roughness: 0.9, flatShading: true });
+    this.windTime = this.windTime || { value: 0 };
+    addWind(leafMat, this.windTime, 0.06);
+    const leaves = new THREE.InstancedMesh(leafGeo, leafMat, n * 2);
     const d = new THREE.Object3D(), c = new THREE.Color();
     const greens = ['#5f8f3a', '#4f7d34', '#7aa046', '#8fa84c', '#c9a14a'];
     spots.forEach((p, i) => {
@@ -419,10 +422,122 @@ export class World {
     this.animated.push((t) => { rimMat.opacity = 0.25 + 0.2 * Math.sin(t * 1.3); });
   }
 
-  // ---------------- 떠다니는 풀린 실 (결시로 보이는 실) ----------------
+  // ---------------- 끊어진 다리 (공공 결산에 따라 모습이 바뀐다) ----------------
+  buildBridge() {
+    const B = HARVEN.bridge, cx = riverX(B.z), half = 9, y = B.deckY;
+    const plankMat = new THREE.MeshStandardMaterial({ color: '#8a6440', roughness: 0.9 });
+    const darkMat = new THREE.MeshStandardMaterial({ color: '#5a3d26', roughness: 0.9 });
+    const stoneMat = new THREE.MeshStandardMaterial({ color: '#9b9285', roughness: 0.95 });
+    const braceMat = new THREE.MeshStandardMaterial({ color: '#d9a35a', emissive: '#6a4a1a', emissiveIntensity: 0.3 });
+    const groups = {};
+    const make = (name) => { const g = new THREE.Group(); g.visible = false; this.group.add(g); groups[name] = g; return g; };
+    const plank = (g, x, yy, rotZ = 0, rotY = 0, mat = plankMat) => { const m = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.12, B.halfWidth * 2), mat); m.position.set(x, yy, B.z); m.rotation.set(0, rotY, rotZ); m.castShadow = m.receiveShadow = true; g.add(m); return m; };
+    for (const s of [-1, 1]) { // 양쪽 교대(돌)
+      const ab = new THREE.Mesh(new THREE.BoxGeometry(2.4, 2.4, B.halfWidth * 2 + 0.8), stoneMat);
+      ab.position.set(cx + s * (half + 0.6), y - 1.1, B.z); ab.castShadow = ab.receiveShadow = true; this.group.add(ab);
+    }
+    // 끊어짐: 양끝만 남고 가운데가 무너짐
+    const broken = make('broken');
+    for (let x = -half; x <= half; x += 1) {
+      if (Math.abs(x) < 4.5) continue;
+      plank(broken, cx + x, y - (Math.abs(x) < 6 ? 0.25 : 0), Math.abs(x) < 6 ? Math.sign(x) * 0.25 : 0);
+    }
+    for (let i = 0; i < 4; i++) plank(broken, cx - 2 + i * 1.3, HARVEN.waterLevel + 0.02, 0.1 * i, i * 0.6, darkMat);
+    for (const s of [-1, 1]) { const p = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 2.6, 6), darkMat); p.position.set(cx + s * 3, -0.6, B.z + s * 0.6); p.rotation.z = s * 0.4; broken.add(p); }
+    // 임시 우회로: 끊어진 다리 그대로 + 여울 쪽 표지·등불
+    const detour = make('detour');
+    detour.add(broken.clone());
+    const signMat = new THREE.MeshStandardMaterial({ color: '#e8dcb8' });
+    const glow = new THREE.MeshStandardMaterial({ color: '#ffd38a', emissive: '#ffae42', emissiveIntensity: 2 });
+    for (const wp of HARVEN.cartRoute.slice(1, 6)) {
+      const yy = heightAt(wp.x - 2, wp.z);
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 2, 6), darkMat); post.position.set(wp.x - 2, yy + 1, wp.z);
+      const sign = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.35, 0.05), signMat); sign.position.set(wp.x - 2, yy + 1.7, wp.z);
+      const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.15, 8, 6), glow); lamp.position.set(wp.x - 2, yy + 2.1, wp.z);
+      detour.add(post, sign, lamp);
+    }
+    // 임시 교량: 처진 판자 + 보강 부품 + 밧줄 난간
+    const temp = make('temp_bridge');
+    for (let x = -half; x <= half; x += 1) plank(temp, cx + x, y - Math.cos((x / half) * Math.PI / 2) * 0.25, 0, Math.sin(x * 7) * 0.03);
+    for (let x = -4; x <= 4; x += 2) { const b = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.25, B.halfWidth * 2 + 0.4), braceMat); b.position.set(cx + x, y - 0.45, B.z); temp.add(b); }
+    for (const s of [-1, 1]) {
+      const pts = []; for (let i = 0; i <= 12; i++) { const t = i / 12; pts.push(new THREE.Vector3(cx - half + t * half * 2, y + 0.9 - Math.sin(t * Math.PI) * 0.35, B.z + s * B.halfWidth)); }
+      temp.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 24, 0.03, 4), darkMat));
+    }
+    // 정식 복구: 상판 + 돌 교각 + 난간
+    const fixed = make('repaired');
+    const deck = new THREE.Mesh(new THREE.BoxGeometry(half * 2 + 1, 0.3, B.halfWidth * 2 + 0.3), plankMat); deck.position.set(cx, y - 0.1, B.z); deck.castShadow = deck.receiveShadow = true; fixed.add(deck);
+    for (const x of [-3.5, 3.5]) { const pier = new THREE.Mesh(new THREE.BoxGeometry(1, 2.4, B.halfWidth * 2), stoneMat); pier.position.set(cx + x, y - 1.3, B.z); fixed.add(pier); }
+    for (const s of [-1, 1]) {
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(half * 2 + 1, 0.1, 0.1), darkMat); rail.position.set(cx, y + 0.85, B.z + s * B.halfWidth); fixed.add(rail);
+      for (let x = -half; x <= half; x += 2) { const p = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.85, 0.12), darkMat); p.position.set(cx + x, y + 0.42, B.z + s * B.halfWidth); fixed.add(p); }
+    }
+    this.bridgeGroups = groups;
+    this.setBridgeState('broken');
+  }
+
+  setBridgeState(state) {
+    for (const [k, g] of Object.entries(this.bridgeGroups)) g.visible = k === state;
+    this.bridgeState = state;
+    // AI 끊어진 다리 모델이 있으면 끊어짐/우회로 상태에서 절차적 잔해 대신 사용
+    if (this.aiBridge) {
+      const brokenish = state === 'broken' || state === 'detour';
+      this.aiBridge.visible = brokenish;
+      if (brokenish) { this.bridgeGroups.broken.visible = false; if (this.bridgeGroups.detour.children[0]) this.bridgeGroups.detour.children[0].visible = false; }
+    }
+  }
+
+  /**
+   * AI 생성 소품 (있을 때만). 절차적 버전은 숨기기만 하고 남겨 둔다 (대체용).
+   * 무거운 메시 상한 때문에 집은 거점 중심 쪽 3채만 교체.
+   */
+  async loadAiProps(ai) {
+    if (!ai.enabled) return;
+    const place = (obj, x, z, rotY = 0) => { obj.position.set(x, heightAt(x, z), z); obj.rotation.y = rotY; this.group.add(obj); return obj; };
+    const loom = await ai.instance('prop_loom');
+    if (loom && this.loomGroup) { place(loom, HARVEN.loom.x, HARVEN.loom.z); this.loomGroup.children.forEach((c) => { if (c.isMesh && !c.material.blending) c.visible = false; }); }
+    const wheel = await ai.instance('prop_waterwheel');
+    if (wheel && this.wheelGroup) {
+      wheel.position.copy(this.wheelGroup.position); wheel.position.y = HARVEN.waterLevel - 0.6; wheel.rotation.y = Math.PI / 2;
+      this.group.add(wheel); this.wheelGroup.visible = false;
+    }
+    const house = await ai.load('prop_house');
+    if (house && this.houseGroups) {
+      const near = this.houseGroups.filter(({ h }) => !h.mill).sort((a, b) => Math.hypot(a.h.x, a.h.z) - Math.hypot(b.h.x, b.h.z)).slice(0, 3);
+      for (const { g, h } of near) {
+        const obj = await ai.instance('prop_house');
+        if (!obj) break;
+        const s = Math.min(h.w, h.d) / 4.2;
+        obj.scale.setScalar(s);
+        place(obj, h.x, h.z, Math.PI);
+        g.visible = false;
+      }
+    }
+    const bridge = await ai.instance('prop_broken_bridge');
+    if (bridge) {
+      const B = HARVEN.bridge;
+      this.aiBridge = place(bridge, riverX(B.z), B.z);
+      this.aiBridge.position.y = HARVEN.waterLevel - 0.2;
+      this.setBridgeState(this.bridgeState || 'broken');
+    }
+  }
+
+  buildDepot() {
+    const d = HARVEN.depot, x = d.x + 5, z = d.z - 3, y = heightAt(x, z);
+    const g = new THREE.Group(); g.position.set(x, y, z);
+    const body = new THREE.Mesh(new THREE.BoxGeometry(6, 5, 5), new THREE.MeshStandardMaterial({ color: '#d9c7a0' })); body.position.y = 1.5;
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(Math.SQRT1_2, 1, 4), new THREE.MeshStandardMaterial({ color: '#6a4a33', flatShading: true }));
+    roof.rotation.y = Math.PI / 4; roof.scale.set(7, 2.2, 6); roof.position.y = 5.1;
+    g.add(body, roof);
+    for (let i = 0; i < 3; i++) { const c = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, 0.9), new THREE.MeshStandardMaterial({ color: '#8a6440' })); c.position.set(-3.8, 0.45 + (i === 2 ? 0.9 : 0), -1 + (i % 2) * 1.0); g.add(c); }
+    g.traverse((o) => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; } });
+    this.group.add(g);
+  }
+
+  // ---------------- 떠다니는 풀린 실 (분위기 연출) ----------------
   buildLooseThreads() {
-    const mat = new THREE.MeshBasicMaterial({ color: '#ffe0a0', transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false });
-    const coldMat = new THREE.MeshBasicMaterial({ color: '#b8c8ff', transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false });
+    const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffe0a0').multiplyScalar(2), transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false });
+    const coldMat = new THREE.MeshBasicMaterial({ color: new THREE.Color('#b8c8ff').multiplyScalar(2), transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false });
     const threads = [];
     const areas = [[HARVEN.spawns[0], mat, 8], [HARVEN.hollow, coldMat, 12], [{ x: 0, z: 0, radius: 14 }, mat, 5]];
     for (const [area, m, n] of areas) {
