@@ -1,6 +1,6 @@
 import { HARVEN, inRiver, inHub, onBridge } from '../data/zones.js';
 import { MONSTERS } from '../data/monsters.js';
-import { NPC_ORDER } from '../data/npcs.js';
+import { NPC_ORDER, NPCS } from '../data/npcs.js';
 import { ITEMS, RECIPES } from '../data/items.js';
 import { ORIGINS } from '../data/origins.js';
 import { CLASSES, statsFor, xpToNext, MAX_LEVEL_SLICE } from '../data/classes.js';
@@ -15,8 +15,15 @@ import { MonsterAI } from './MonsterAI.js';
 import { ContractSystem } from './Contracts.js';
 import { PublicState, Relations, DEFAULT_FIGURES } from './WorldState.js';
 import { buildDialog } from './Dialogs.js';
+import { NpcLife } from './NpcLife.js';
+import { HiddenQuestSystem } from './HiddenQuests.js';
+import { ExploreMap } from './Explore.js';
+import { relOf, relEvent, giveGift, dailyTalk, helpVillager, migrateRelations, applyDelta } from './Relationships.js';
+import { DESKS, HELP_TASKS, PLACES, VILLAGERS } from '../data/households.js';
+import { AFFINITY } from '../data/npcs.js';
+import { FEEL } from '../data/feel.js';
 
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
 /**
  * 순수 게임 상태/규칙 (three.js·DOM 의존 없음 → Node 서버에서도 실행 가능).
@@ -50,10 +57,17 @@ export class GameState {
   init(profile, save = null) {
     const ch = save?.character;
     const p = createPlayer(this.nextId++, { name: profile.name, origin: profile.origin, classId: profile.classId, character: ch });
-    p.relations = structuredClone(save?.personal?.relations || {});
+    p.relations = migrateRelations(structuredClone(save?.personal?.relations || {}));
+    p.hidden = structuredClone(save?.personal?.hidden || {});
+    p.cosmetics = [...(save?.personal?.cosmetics || [])];
+    p.title = save?.personal?.title || null;
+    p.helpTask = null;
+    p.waypoint = save?.personal?.waypoint || null;
+    p.stamina = { value: FEEL.move.max, locked: false, lastUse: -99 };
+    p.sprint = false;
     p.contracts = { active: null, done: { ...(save?.personal?.contracts?.done || {}) } };
     p.contribs = { ...(save?.personal?.contribs || {}) };
-    p.records = { clues: [...(save?.personal?.records?.clues || [])], log: [...(save?.personal?.records?.log || [])] };
+    p.records = { clues: [...(save?.personal?.records?.clues || [])], log: [...(save?.personal?.records?.log || [])], letters: [...(save?.personal?.records?.letters || [])], pois: [...(save?.personal?.records?.pois || [])] };
     if (!ch?.origin) { // 새 캐릭터(또는 구 저장 이관): 출신 소지품
       const o = ORIGINS[profile.origin];
       if (o) p.inventory[o.item] = 1;
@@ -69,7 +83,15 @@ export class GameState {
     this.lastSeen = save?.personal?.lastSeen || null;
     this.offlineGain = save?.savedAt ? this.publicState.applyOffline((Date.now() - save.savedAt) / 1000) : 0;
 
-    for (const id of NPC_ORDER) this.add(createNpc(this.nextId++, id));
+    // 살아 있는 NPC: 시계·일과·가족 (접속하지 않은 시간은 시계만 진행)
+    this.life = new NpcLife(this, save?.world?.life);
+    this.hidden = new HiddenQuestSystem(this);
+    this.explore = new ExploreMap(save?.personal?.explored);
+    for (const id of NPC_ORDER) this.life.register(this.add(createNpc(this.nextId++, id)));
+    for (const id of Object.keys(VILLAGERS)) { const v = createNpc(this.nextId++, id); v.scale = VILLAGERS[id].scale || 1; this.life.register(this.add(v)); }
+    if (save?.savedAt) this.life.advanceOffline((Date.now() - save.savedAt) / 1000);
+    for (const [id, d] of Object.entries(DESKS)) { const e = createInteractable(this.nextId++, 'desk', { ...d, id }); e.modelId = 'prop_desk'; this.add(e); }
+    this.explore.reveal(p.pos.x, p.pos.z);
     for (const n of HARVEN.nodes) this.add(createInteractable(this.nextId++, 'node', n));
     for (const c of HARVEN.clues) this.add(createInteractable(this.nextId++, 'clue', c));
     this.add(createInteractable(this.nextId++, 'station', { name: '교량 조 작업대', ...HARVEN.workbench }));
@@ -83,7 +105,7 @@ export class GameState {
   livingMonsters() { const r = []; for (const e of this.entities.values()) if (e.kind === 'monster' && e.alive) r.push(e); return r; }
   log(text, kind = 'system') { this.bus.emit('log', { text, kind }); }
   schedule(delay, fn) { this.scheduled.push({ at: this.time + delay, fn }); }
-  dialog(npcId, page) { return buildDialog(this, this.player(), npcId, page); }
+  dialog(npcId, page, opts) { return buildDialog(this, this.player(), npcId, page, opts); }
 
   spawnMonster(spawnIndex, at = null) {
     const s = HARVEN.spawns[spawnIndex];
@@ -146,7 +168,7 @@ export class GameState {
       }
       case 'interact': {
         const e = this.get(cmd.id);
-        if (!e || !p.alive || !['npc', 'node', 'clue', 'station'].includes(e.kind)) return;
+        if (!e || !p.alive || !['npc', 'node', 'clue', 'station', 'desk', 'task'].includes(e.kind)) return;
         p.interactId = e.id; p.attackTargetId = null; p.move.target = null;
         break;
       }
@@ -173,6 +195,19 @@ export class GameState {
         this.log('모라가 새끼 양을 보러 가겠다며 장부에 적습니다.', 'system');
         break;
       case 'changeClass': fail(this.changeClass(p, cmd.classId)); break;
+      case 'talkBelief': { const r = dailyTalk(this, p, cmd.npcId, cmd.tag); if (r !== true) fail(r); break; }
+      case 'gift': { const r = giveGift(this, p, cmd.npcId, cmd.item); if (typeof r === 'string') fail(r); break; }
+      case 'helpVillager': { const r = helpVillager(this, p, cmd.npcId); this.bus.emit('npcSay', { npcId: cmd.npcId, text: r }); break; }
+      case 'helpStart': fail(this.startHelp(p, cmd.npcId)); break;
+      case 'hiddenAccept': fail(this.hidden.accept(p, cmd.id)); break;
+      case 'hiddenTalk': { const t = this.hidden.talk(p, cmd.id); if (t) this.bus.emit('hiddenScene', { id: cmd.id, lines: t }); break; }
+      case 'hiddenChoose': { const r = this.hidden.choose(p, cmd.id, cmd.index); this.bus.emit('npcSay', { npcId: cmd.npcId, text: r.text }); break; }
+      case 'hiddenAbandon': this.hidden.abandon(p, cmd.id); break;
+      case 'relQuest': fail(this.relQuest(p, cmd.npcId)); break;
+      case 'herbSalve': fail(this.herbSalve(p)); break;
+      case 'setWaypoint': p.waypoint = cmd.x == null ? null : { x: cmd.x, z: cmd.z }; this.bus.emit('waypoint', { ...(p.waypoint || {}) }); break;
+      case 'sprint': p.sprint = !!cmd.on; break;
+      case 'debugDummy': this.spawnDummy(p); break;
       case 'buy': fail(Shop.buy(this, p, cmd.item, cmd.count)); break;
       case 'sell': fail(Shop.sell(this, p, cmd.item, cmd.count)); break;
       case 'equip': fail(Shop.equip(this, p, cmd.item)); break;
@@ -181,6 +216,81 @@ export class GameState {
       case 'quickPotion': fail(Shop.quickPotion(this, p)); break;
       case 'openShop': if (fail(Shop.nearShop(this, p)) === true) this.bus.emit('shopOpen', { shopId: 'merchant' }); break;
     }
+  }
+
+  // ───────────── 질주 · 기력 (구르기와 공유) ─────────────
+  sprinting(p) { return p.sprint && !p.stamina.locked && p.stamina.value > 0 && (p.moving || p.move.target || p.move.dir.x || p.move.dir.z || p.attackTargetId); }
+  updateStamina(p, dt) {
+    const M = FEEL.move, s = p.stamina;
+    if (this.sprinting(p) && p.lastMoveT > this.time - 0.15) {
+      s.value = Math.max(0, s.value - (this.time - p.lastCombat < 5 ? M.combatDrain : M.drain) * dt);
+      s.lastUse = this.time;
+      if (s.value <= 0) { s.locked = true; this.bus.emit('staminaOut', {}); }
+    } else if (this.time - s.lastUse > M.regenDelay) s.value = Math.min(M.max, s.value + M.regen * dt);
+    if (s.locked && s.value >= M.unlockAt) s.locked = false;
+  }
+
+  // ───────────── 일 돕기 (매일 1회) · 관계 퀘스트 · 약초 연고 ─────────────
+  startHelp(p, npcId) {
+    const t = HELP_TASKS[npcId];
+    const r = relOf(p, npcId);
+    if (!t) return '도울 일이 없습니다';
+    if (r.daily.help === this.life.day) return '오늘은 이미 도왔습니다';
+    if (r.anti >= 50) return `${NPCS[npcId].name}은(는) 지금 도움을 받고 싶어 하지 않는다`;
+    const e = this.life.entity(npcId);
+    if (!e || !t.activity.includes(e.activity?.id)) return '그 일을 하고 있을 때 도울 수 있습니다';
+    if (p.helpTask) this.cancelHelp(p);
+    const pl = PLACES[t.place];
+    const spots = [];
+    for (let i = 0; i < t.spots; i++) {
+      const a = (i / t.spots) * Math.PI * 2;
+      spots.push(this.add(createInteractable(this.nextId++, 'task', { name: t.name, npcId, x: pl.x + Math.cos(a) * 2.6, z: pl.z + Math.sin(a) * 2.6 })).id);
+    }
+    p.helpTask = { npcId, left: t.spots, spots };
+    this.log(`[돕기] ${NPCS[npcId].name}: ${t.desc}`, 'quest');
+    return true;
+  }
+  cancelHelp(p) { for (const id of p.helpTask.spots) this.remove(id); p.helpTask = null; }
+  helpProgress(p, e) {
+    const h = p.helpTask;
+    if (!h || e.data.npcId !== h.npcId) return;
+    this.remove(e.id);
+    h.spots = h.spots.filter((x) => x !== e.id);
+    if (--h.left > 0) return;
+    const t = HELP_TASKS[h.npcId];
+    p.helpTask = null;
+    relOf(p, h.npcId).daily.help = this.life.day;
+    relEvent(this, p, h.npcId, `도움_${h.npcId}`, { delta: { aff: t.aff, rap: t.rap }, repeatable: true });
+    if (t.gold) p.gold += t.gold;
+    if (t.herbs) this.life.world.herbs = Math.min(12, this.life.world.herbs + t.herbs);
+    this.gainXp(p, t.xp);
+    this.log(`[돕기 완료] ${t.name} — ${NPCS[h.npcId].name}의 일을 도왔습니다.`, 'quest');
+  }
+  relQuest(p, npcId) {
+    const q = AFFINITY[npcId]?.relQuest, r = relOf(p, npcId);
+    if (!q || r.tags.includes(q.tag)) return '할 일이 없습니다';
+    if (q.needItem) { if ((p.inventory[q.needItem.id] || 0) < q.needItem.count) return `${ITEMS[q.needItem.id].name} ${q.needItem.count}개가 필요합니다`; p.inventory[q.needItem.id] -= q.needItem.count; this.bus.emit('inventory', {}); }
+    if (q.needContract && p.contracts.done[q.needContract] !== 'success') return '먼저 관련 계약을 마쳐야 합니다';
+    relEvent(this, p, npcId, q.tag);
+    this.bus.emit('npcSay', { npcId, text: q.done });
+    return true;
+  }
+  /** 모라의 약초(직업 결과) → 하루 한 번 결 연고 */
+  herbSalve(p) {
+    const r = relOf(p, 'mora');
+    if (r.daily.salve === this.life.day) return '오늘 연고는 이미 받았습니다';
+    if (this.life.world.herbs < 2) return '약초가 모자라 연고를 만들지 못했답니다';
+    this.life.world.herbs -= 2; r.daily.salve = this.life.day;
+    this.giveItem(p, 'salve', 1);
+    return true;
+  }
+  /** 타격감 시험용 허수아비 (F9) */
+  spawnDummy(p) {
+    const si = HARVEN.spawns.findIndex((s) => s.monster === 'tangled_alpha');
+    const m = this.spawnMonster(si, { x: p.pos.x + Math.sin(p.rot) * 4, z: p.pos.z + Math.cos(p.rot) * 4 });
+    m.name = '훈련용 허수아비'; m.dummy = true; m.noRespawn = true;
+    m.stats.maxHp = m.hp = 99999; m.stats.atk = 0; m.ai.state = 'idle'; m.ai.dummy = true;
+    this.log('[시험] 훈련용 허수아비를 세웠습니다 (공격하지 않음).', 'system');
   }
 
   // ───────────── 직업 변경: 안전 거점 + 비전투만 ─────────────
@@ -221,6 +331,9 @@ export class GameState {
     }
     this.separateMonsters();
     this.publicState.update(dt);
+    this.life.update(dt);
+    const pl = this.player();
+    if (pl) { this.hidden.update(pl, dt); this.explore.update(pl, dt); }
     for (let i = this.respawnQueue.length - 1; i >= 0; i--) {
       const r = this.respawnQueue[i];
       if (r.at <= this.time) { this.respawnQueue.splice(i, 1); this.spawnMonster(r.spawnIndex); }
@@ -230,6 +343,7 @@ export class GameState {
   updatePlayer(p, dt) {
     if (!p.alive) { if (this.time >= p.respawnAt) this.respawnPlayer(p); return; }
     updateResource(this, p, dt);
+    this.updateStamina(p, dt);
     updateCast(this, p, p.aimPt);
     p.moving = false;
     // 구르기 이동
@@ -247,7 +361,7 @@ export class GameState {
     if (this.time - p.lastCombat > 6) p.hp = Math.min(p.stats.maxHp, p.hp + p.stats.maxHp * 0.03 * dt);
 
     const riverSlow = inRiver(p.pos.x, p.pos.z) && !(this.publicState.bridgeWalkable() && onBridge(p.pos.x, p.pos.z));
-    const speed = p.stats.moveSpeed * (riverSlow ? 0.6 : 1) * speedMult(p);
+    const speed = p.stats.moveSpeed * (riverSlow ? 0.6 : 1) * speedMult(p) * (this.sprinting(p) ? FEEL.move.sprintMult : 1);
     const dir = p.move.dir;
     if (dir.x || dir.z) { const l = Math.hypot(dir.x, dir.z); this.step(p, dir.x / l, dir.z / l, speed * dt); return; }
     if (p.attackTargetId != null) {
@@ -273,7 +387,15 @@ export class GameState {
 
   // ───────────── 상호작용 (대화/채집/조사/조립) ─────────────
   beginInteract(p, e) {
-    if (e.kind === 'npc') { this.bus.emit('npcInteract', { npcId: e.npcId, id: e.id }); return; }
+    if (e.kind === 'npc') {
+      if (e.hidden) return this.bus.emit('actionFail', { reason: '집 안에 있다. 창구를 이용하세요' });
+      this.life.pause(e.npcId, 8);
+      this.hidden.check(p);
+      this.bus.emit('npcInteract', { npcId: e.npcId, id: e.id });
+      return;
+    }
+    if (e.kind === 'desk') { this.bus.emit('npcInteract', { npcId: e.data.serviceOf, id: e.id, substitute: true }); return; }
+    if (e.kind === 'task') return this.startChannel(p, e, 'help', HELP_TASKS[e.data.npcId].channel);
     if (e.kind === 'node') {
       if (this.time < e.readyAt) return this.bus.emit('actionFail', { reason: '아직 다시 모이지 않았습니다' });
       return this.startChannel(p, e, 'gather', 1.4);
@@ -299,6 +421,7 @@ export class GameState {
     if (!e) return;
     if (c.kind === 'gather') { this.giveItem(p, e.data.item, 1 + (this.rng() < 0.4 ? 1 : 0), e.pos); e.readyAt = this.time + 20; }
     if (c.kind === 'craft') this.contracts.craft(p, 'brace');
+    if (c.kind === 'help') return this.helpProgress(p, e);
     if (c.kind === 'investigate') {
       const first = !(p.records.clues || []).includes(e.data.id);
       this.contracts.onClue(p, e.data.id);
@@ -463,11 +586,12 @@ export class GameState {
         relations: structuredClone(p.relations),
         contracts: { done: { ...p.contracts.done } }, // 진행 중 계약은 저장하지 않음 (다음 접속에 처음부터, 벌칙 없음)
         contribs: { ...p.contribs },
-        records: { clues: [...(p.records.clues || [])], log: p.records.log.slice(-30) },
+        records: { clues: [...(p.records.clues || [])], log: p.records.log.slice(-30), letters: p.records.letters.slice(-20), pois: [...p.records.pois] },
+        hidden: structuredClone(p.hidden), cosmetics: [...p.cosmetics], title: p.title, waypoint: p.waypoint, explored: this.explore.serialize(),
         lastSeen: this.snapshot(),
       },
       public: this.publicState.serialize(),
-      world: { figures: { ...this.figures } },
+      world: { figures: { ...this.figures }, life: this.life.serialize() },
     };
   }
 
@@ -485,6 +609,8 @@ export class GameState {
     if (this.offlineGain > 0) out.push(`접속하지 않은 동안 교량 조와 다른 계약자들이 작업을 이어 갔습니다 (공공 진행 +${this.offlineGain}).`);
     if (ls.bridge !== b.state) out.push(`교역로: ${BRIDGE_EVENT.states[ls.bridge].name} → ${BRIDGE_EVENT.states[b.state].name}. ${BRIDGE_EVENT.states[b.state].desc}`);
     for (const [k, v] of Object.entries(this.figures)) if (ls.figures?.[k] && ls.figures[k] !== v) out.push(`${k}: ${v}`);
+    const fresh = (this.player().records.letters || []).filter((l) => !l.read);
+    for (const l of fresh) { out.push(`✉ ${l.text}`); l.read = true; }
     if (!out.length) out.push('지난 접속 이후 크게 바뀐 것은 없습니다. 거점은 여전히 다리 소식으로 붐빕니다.');
     return out;
   }

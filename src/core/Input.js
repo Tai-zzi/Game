@@ -4,7 +4,7 @@ import * as THREE from 'three';
  * 키 배치 프리셋 (W 충돌 해결: 이동 방식에 따라 기술 줄 전체를 옮긴다)
  *  lostark: 마우스 이동(+방향키) · 기술 Q W E R / A S D F · 각성 V · 기본 공격 C(또는 적 좌클릭) · 구르기 Space · 상호작용 G
  *  wasd   : WASD 이동 · 기술 1~8 · 각성 X · 기본 공격 Z(또는 적 좌클릭) · 구르기 Space · 상호작용 G
- * 공통: T 회복약, I 소지품, Tab 대상, F2 배치 전환, F3 그래픽 품질
+ * 공통: Shift 질주, T 회복약, I 소지품, M 지도, K 인연, Tab 대상, F2 배치 전환, F3 그래픽 품질, F9 타격감 시험 허수아비
  */
 export const KEYMAPS = {
   lostark: { label: '로스트아크식 (마우스 이동 · QWER/ASDF)', move: { up: ['ArrowUp'], down: ['ArrowDown'], left: ['ArrowLeft'], right: ['ArrowRight'] },
@@ -84,6 +84,7 @@ export class Input {
     if (down) this.keys.add(e.code); else this.keys.delete(e.code);
     if (!this.enabled) return;
     const slot = this.keymap.slots[e.code];
+    if (!down && (e.code === 'ShiftLeft' || e.code === 'ShiftRight')) { this.send({ type: 'sprint', on: false }); return; }
     if (!down) { // 차지·유지 기술은 놓을 때
       if (slot && this.heldSlots.has(slot)) { this.heldSlots.delete(slot); this.send({ type: 'skillRelease', slot, aim: this.aim }); }
       return;
@@ -93,6 +94,10 @@ export class Input {
     switch (e.code) {
       case 'KeyI': this.hooks.onInventory?.(); break;
       case 'KeyG': this.hooks.onInteractKey?.(); break;
+      case 'KeyM': this.hooks.onMap?.(); break;
+      case 'KeyK': this.hooks.onBonds?.(); break;
+      case 'F9': e.preventDefault(); this.send({ type: 'debugDummy' }); break;
+      case 'ShiftLeft': case 'ShiftRight': this.send({ type: 'sprint', on: true }); break;
       case 'KeyT': this.send({ type: 'quickPotion' }); break;
       case 'F3': e.preventDefault(); this.hooks.onQuality?.(); break;
       case 'Tab': e.preventDefault(); this.hooks.onTabTarget?.(); break;

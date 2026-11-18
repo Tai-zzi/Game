@@ -85,3 +85,9 @@ export const NPCS = {
 };
 
 export const NPC_ORDER = ['haila', 'belo', 'mora', 'merchant', 'trainer'];
+
+// 관계 데이터와 주민(가구) 데이터를 함께 내보낸다
+export { AFFINITY, AFF_TIERS, ANTI_TIERS, GIFT_RULES, DISCOUNTS } from './affinity.js';
+import { VILLAGERS } from './households.js';
+/** 주민도 NPC 목록에 포함 (대화·이름표·대상 프레임 공용) */
+for (const v of Object.values(VILLAGERS)) NPCS[v.id] = { ...v, pos: { x: 0, z: 0 }, rot: 0, greeting: v.lines, tagLines: {}, villager: true };

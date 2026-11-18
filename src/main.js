@@ -20,6 +20,8 @@ import { Minimap } from './ui/Minimap.js';
 import { Dialog } from './ui/Dialog.js';
 import { ShopUI } from './ui/ShopUI.js';
 import { showTitle } from './ui/Title.js';
+import { WorldMap, BondsWindow } from './ui/WorldMap.js';
+import { NPCS } from './data/npcs.js';
 
 /**
  * 진입점: 계층 조립.
@@ -37,7 +39,7 @@ world.loadAiProps(AiAssets);
 const vfx = new VFX(renderer.scene);
 const bus = new EventBus();
 const clock = new THREE.Clock();
-let game = null, views, hud, overlay, minimap, dialog, input, shop;
+let game = null, views, hud, overlay, minimap, dialog, input, shop, worldMap, bonds;
 let elapsed = 0, hitStopT = 0, slowT = 0;
 const tmp = new THREE.Vector3();
 
@@ -58,6 +60,13 @@ function loop() {
     hud.update();
     overlay.update(realDt);
     minimap.update(realDt);
+    worldMap.update();
+    renderer.setTimeOfDay(game.life.hour);
+    const pl = game.player();
+    const sprinting = game.sprinting(pl) && pl.moving;
+    renderer.setFovKick(sprinting ? FEEL.move.fovKick : 0);
+    if (sprinting && Math.random() < realDt * 18) vfx.dust(views.positionOf(pl.id));
+    updateWaypointArrow(pl);
   } else {
     renderer.zoomTarget = 30;
     renderer.follow(tmp.set(Math.sin(elapsed * 0.07) * 14, 0, Math.cos(elapsed * 0.07) * 14), realDt);
@@ -77,6 +86,24 @@ function setQuality(q) {
   hud?.toast(q === 'high' ? '그래픽: 높음 (후처리·AI 모델)' : '그래픽: 낮음 (후처리 끔·대체 모델 — 다시 시작 시 완전 적용)');
 }
 
+const arrow = document.getElementById('waypoint-arrow');
+const proj = new THREE.Vector3();
+/** 화면 가장자리 목적지 화살표 */
+function updateWaypointArrow(p) {
+  if (!p.waypoint) { arrow.classList.add('hidden'); return; }
+  const d = Math.hypot(p.waypoint.x - p.pos.x, p.waypoint.z - p.pos.z);
+  if (d < 3) { game.command({ type: 'setWaypoint' }); hud.toast('목적지에 도착했습니다'); return; }
+  proj.set(p.waypoint.x, heightAt(p.waypoint.x, p.waypoint.z) + 1, p.waypoint.z).project(renderer.camera);
+  let x = proj.x, y = -proj.y;
+  const on = Math.abs(x) < 0.85 && Math.abs(y) < 0.85 && proj.z < 1;
+  if (proj.z > 1) { x = -x; y = -y; }
+  const k = Math.max(Math.abs(x), Math.abs(y)) / 0.85;
+  if (!on) { x /= k; y /= k; }
+  arrow.classList.remove('hidden');
+  arrow.style.transform = `translate(${(x * 0.5) * window.innerWidth}px, ${(y * 0.5) * window.innerHeight}px) rotate(${Math.atan2(y, x)}rad)`;
+  arrow.querySelector('span').textContent = `${Math.round(d)}m`;
+}
+
 function startGame(profile, saveData) {
   game = new GameState(bus);
   views = new EntityViews(renderer.scene, game, bus, vfx);
@@ -86,8 +113,10 @@ function startGame(profile, saveData) {
     onChat: (text) => bus.emit('log', { text: `[일반] ${game.player().name}: ${text}`, kind: 'chat' }),
   });
   overlay = new Overlay(game, bus, views, renderer.camera);
-  dialog = new Dialog({ onAction: (cmd) => send(cmd), getPage: (npcId, page) => game.dialog(npcId, page), game });
+  dialog = new Dialog({ onAction: (cmd) => send(cmd), getPage: (npcId, page, opts) => game.dialog(npcId, page, opts), game });
   shop = new ShopUI(game, bus, send, AiAssets);
+  worldMap = new WorldMap(game, send);
+  bonds = new BondsWindow(game);
 
   game.init(profile, saveData);
   const pid = game.playerId;
@@ -106,7 +135,7 @@ function startGame(profile, saveData) {
         const p = game.player();
         let best = null, bd = 6;
         for (const e of game.entities.values()) {
-          if (!['npc', 'node', 'clue', 'station'].includes(e.kind)) continue;
+          if (!['npc', 'node', 'clue', 'station', 'desk', 'task'].includes(e.kind) || e.hidden) continue;
           const d = Math.hypot(e.pos.x - p.pos.x, e.pos.z - p.pos.z);
           if (d < bd) { bd = d; best = e; }
         }
@@ -121,7 +150,9 @@ function startGame(profile, saveData) {
         const i = list.findIndex((o) => o.m.id === p.targetId);
         send({ type: 'setTarget', targetId: list[(i + 1) % list.length].m.id });
       },
-      onEscape: () => { if (shop.open) shop.close(); else send({ type: 'setTarget', targetId: null }); },
+      onEscape: () => { if (worldMap.open) worldMap.close(); else if (bonds.open) bonds.close(); else if (shop.open) shop.close(); else send({ type: 'setTarget', targetId: null }); },
+      onMap: () => worldMap.toggle(),
+      onBonds: () => bonds.toggle(),
       onChat: () => hud.focusChat(),
       onInventory: () => shop.toggleInventory(),
       onQuality: () => setQuality(renderer.quality === 'high' ? 'low' : 'high'),
@@ -238,7 +269,18 @@ function startGame(profile, saveData) {
   bus.on('levelUp', () => { vfx.levelUp(() => posOf(pid)); Sfx.play('levelUp'); persist(); });
   bus.on('loot', ({ itemId, at }) => { if (at) vfx.loot(new THREE.Vector3(at.x, posOf(pid).y + 0.5, at.z), () => posOf(pid, 1), AiAssets, itemId); Sfx.play('coin'); });
   bus.on('trade', () => Sfx.play('coin'));
-  bus.on('npcInteract', ({ npcId }) => { dialog.show(game.dialog(npcId)); Sfx.play('click'); });
+  bus.on('npcInteract', ({ npcId, substitute }) => { dialog.show(game.dialog(npcId, 'main', { substitute })); Sfx.play('click'); });
+  // ───── 관계 · 살아 있는 NPC ─────
+  bus.on('tierUp', ({ npcId, tier, line }) => { hud.banner(`${NPCS[npcId].name} · ${tier}`, line); Sfx.play('levelUp'); persist(); });
+  bus.on('hiddenDiscovered', ({ npcId, text }) => { hud.toast(`✦ ${NPCS[npcId].name}이(가) 따로 할 이야기가 있는 것 같다`); hud.log(`✦ ${text}`, 'relation'); });
+  bus.on('hiddenScene', ({ name, lines }) => { hud.showSummary([], `${name ? `<b>${name}</b><br>` : ''}${lines.join('<br>')}`); });
+  bus.on('hiddenDone', () => { Sfx.play('levelUp'); persist(); });
+  bus.on('hardLine', ({ npcId, text }) => hud.log(`[금지선] ${NPCS[npcId].name}: ${text} — 관계와 상관없이 하지 않는다`, 'warn'));
+  bus.on('familyEvent', ({ kind, child, guardian }) => { if (kind === 'childHurt') hud.log(`[주민] ${NPCS[child].name}이(가) 놀다 넘어졌다. ${NPCS[guardian]?.name || '보호자'}가 진료소로 데려간다.`, 'system'); });
+  bus.on('gift', ({ liked, disliked }) => hud.toast(liked ? '반가워한다' : disliked ? '표정이 굳는다' : '고맙다며 받는다'));
+  bus.on('newDay', ({ day }) => hud.log(`— ${day}일째 아침 —`, 'system'));
+  bus.on('staminaOut', () => hud.toast('기력이 바닥났다'));
+  bus.on('waypoint', () => Sfx.play('click'));
   bus.on('shopOpen', () => { dialog.close(); shop.openShop(); });
   bus.on('clue', ({ name, text, first }) => { if (first) hud.showSummary([], `<b>${name}</b><br>${text}`); });
   bus.on('bridgeState', ({ state }) => { world.setBridgeState(state); persist(); });

@@ -168,12 +168,20 @@ export class CharacterModel {
 
   playLoop(state) {
     if (this.kind !== 'rig' || this.dead) return;
-    const name = this.style[state] || this.style.idle;
+    const name = state === 'activity' ? this.activityAnims[this.activityIdx % this.activityAnims.length] : (this.style[state] || (state === 'sprint' ? this.style.run : this.style.idle));
     const a = this.clipAction(name) || this.clipAction(this.style.idle);
     if (!a || this.current === a) return;
     a.reset().setEffectiveTimeScale(1).setEffectiveWeight(1).setLoop(THREE.LoopRepeat).fadeIn(0.18).play();
     if (this.current) this.current.fadeOut(0.18);
     this.current = a;
+  }
+
+  /** 일과 활동 애니메이션 (번갈아 반복). null 이면 기본 이동 상태 */
+  setActivity(anims) {
+    const key = anims ? anims.join('|') : '';
+    if (key === this.activityKey) return;
+    this.activityKey = key; this.activityAnims = anims; this.activityIdx = 0; this.activityT = 0;
+    if (!anims && this.kind === 'rig' && !this.action) { this.current = null; this.playLoop(this.loco); }
   }
 
   setLocomotion(state) {
@@ -252,6 +260,12 @@ export class CharacterModel {
       this.action = null;
       if (this.kind === 'rig' && !this.dead) { this.current = null; this.playLoop(this.loco); }
     }
+    // 일과 활동: 서 있을 때 클립을 몇 초마다 바꿔 가며 반복
+    if (this.activityAnims && this.loco === 'idle' && !this.action && this.kind === 'rig') {
+      this.activityT -= dt;
+      if (this.activityT <= 0) { this.activityT = 3 + Math.random() * 3; this.activityIdx++; this.current = null; this.playLoop('activity'); }
+    }
+    if (this.current && this.loco === 'sprint' && !this.style.sprint) this.current.setEffectiveTimeScale(1.4);
     if (this.mixer) this.mixer.update(dt);
     if (this.kind === 'proc') this.animateProcedural(dt, t + this.phase);
     else if (this.kind === 'static') this.animateStatic(dt, t + this.phase);
@@ -283,7 +297,7 @@ export class CharacterModel {
 
   animateProcedural(dt, t) {
     if (this.spec.prop) return;
-    const p = this.parts, run = this.loco === 'run';
+    const p = this.parts, run = this.loco === 'run' || this.loco === 'sprint';
     const tgt = this.target;
     for (const j of JOINTS) tgt[j] = 0;
     // 기본 이동 상태

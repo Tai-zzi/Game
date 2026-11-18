@@ -227,6 +227,7 @@ export class ContractSystem {
     p.gold += c.rewards.gold;
     this.game.log(`계약 완료: 「${c.name}」 (+${c.rewards.gold} 골드, 공공 기여 +${add})`, 'quest');
     p.records.log.push({ at: Date.now(), text: `「${c.name}」 완료` });
+    Relations.tag(this.game, p, c.giver, `${id}_완료`); // 약속을 지킴 (신뢰)
     this.game.gainXp(p, c.rewards.xp);
     this.game.bus.emit('contractUpdate', { id, completed: true });
   }

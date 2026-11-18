@@ -150,6 +150,35 @@ export class Renderer {
     this.composer.setSize(window.innerWidth, window.innerHeight);
   }
 
+  /**
+   * 시간대 조명 (0~24시): 해·하늘·안개·반구광. 밤에도 완전히 어둡지 않게(달빛).
+   */
+  setTimeOfDay(h) {
+    const ss = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+    const day = ss(5, 7.5, h) * (1 - ss(17.5, 20, h));
+    const dusk = Math.max(ss(5, 6.5, h) * (1 - ss(6.5, 8.5, h)), ss(16.5, 18.5, h) * (1 - ss(18.5, 20.5, h)));
+    const c = (a, b, k) => new THREE.Color(a).lerp(new THREE.Color(b), k);
+    const night = 1 - day;
+    this.sun.intensity = 0.25 + day * 2.4;
+    this.sun.color.copy(c('#9fb0ff', '#ffd7a0', day)).lerp(new THREE.Color('#ff9a5a'), dusk * 0.6);
+    this.hemi.intensity = 0.28 + day * 0.45;
+    const top = c('#0e1530', '#6f9fd6', day).lerp(new THREE.Color('#5a4a8a'), dusk * 0.5);
+    const mid = c('#2a2a48', '#f6d7b0', day).lerp(new THREE.Color('#ff9a6a'), dusk * 0.6);
+    this.skyMat.uniforms.top.value.copy(top);
+    this.skyMat.uniforms.mid.value.copy(mid);
+    this.skyMat.uniforms.bottom.value.copy(mid);
+    this.scene.fog.color.copy(mid);
+    this.scene.background = this.scene.fog.color;
+    this.renderer.toneMappingExposure = 0.85 + day * 0.15;
+    // 해의 방향: 아침 동쪽 → 저녁 서쪽 (그림자 길이 변화)
+    const a = ((h - 6) / 12) * Math.PI;
+    this.sunOffset.set(Math.cos(a) * -40, 20 + Math.sin(Math.max(0.15, Math.min(Math.PI - 0.15, a))) * 40, 22);
+    this.night = night;
+  }
+
+  /** 질주 시 시야 살짝 넓힘 */
+  setFovKick(k) { this.fovKick = k; }
+
   /** 트라우마 누적 (0~1). 실제 흔들림은 trauma² 에 비례 */
   addShake(a) { this.trauma = Math.min(1, this.trauma + a); }
   /** 강타 시 잠깐 확대 */
@@ -173,6 +202,8 @@ export class Renderer {
       this.trauma = Math.max(0, this.trauma - dt * 1.6);
     }
     this.camera.lookAt(this.focus.x, this.focus.y + 0.8, this.focus.z);
+    const fov = 38 + (this.fovKick || 0);
+    if (Math.abs(this.camera.fov - fov) > 0.01) { this.camera.fov += (fov - this.camera.fov) * Math.min(1, dt * 6); this.camera.updateProjectionMatrix(); }
     this.sun.position.copy(this.focus).add(this.sunOffset);
     this.sun.target.position.copy(this.focus);
     this.sky.position.copy(this.camera.position);

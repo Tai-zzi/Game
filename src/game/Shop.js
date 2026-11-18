@@ -3,6 +3,22 @@ import { NPCS } from '../data/npcs.js';
 import { dist2D } from '../core/math.js';
 import { applyStats } from './Entity.js';
 import { heal } from './Combat.js';
+import { discountFor } from './Relationships.js';
+
+/** 다리가 끊긴 동안 들어오지 않는 물건 (교역로 상태가 상인 재고에 반영) */
+const NEEDS_ROUTE = new Set(['potion_m', 'acc1', 'acc2']);
+export function inStock(game, itemId) {
+  if (NEEDS_ROUTE.has(itemId) && game.publicState?.bridge.state === 'broken') return '다리가 끊겨 아직 들어오지 않았습니다';
+  return true;
+}
+/** 가격: 친밀도 할인(최대 5%) · 교역로가 끊기면 장비값 +20% (검증 전 예시) */
+export function priceOf(game, p, itemId) {
+  const it = ITEMS[itemId];
+  if (!it?.price) return 0;
+  let m = 1 - discountFor(p, 'merchant');
+  if (it.type === 'gear' && game.publicState?.bridge.state === 'broken') m *= 1.2;
+  return Math.max(1, Math.round(it.price * m));
+}
 
 /**
  * 상점·소지품·장비 규칙 (서버 권위 지점). 화폐는 골드뿐이며 현금 상품은 없다.
@@ -20,8 +36,10 @@ export function buy(game, p, itemId, count = 1, shopId = 'merchant') {
   if (near !== true) return near;
   const it = ITEMS[itemId];
   if (!it?.price || !SHOP_STOCK[shopId]?.includes(itemId)) return '팔지 않는 물건입니다';
+  const st = inStock(game, itemId);
+  if (st !== true) return st;
   count = Math.max(1, Math.floor(count));
-  const cost = it.price * count;
+  const cost = priceOf(game, p, itemId) * count;
   if (p.gold < cost) return '골드가 부족합니다';
   p.gold -= cost;
   p.inventory[itemId] = (p.inventory[itemId] || 0) + count;

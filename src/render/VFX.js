@@ -164,6 +164,13 @@ export class VFX {
     this.ring(pos, '#ff6a5a', 3, 0.5);
   }
 
+  /** 질주 먼지 */
+  dust(pos) {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(0.18, 6, 4), new THREE.MeshBasicMaterial({ color: '#d8c8a8', transparent: true, opacity: 0.45, depthWrite: false }));
+    m.position.set(pos.x + (Math.random() - 0.5) * 0.4, pos.y + 0.1, pos.z + (Math.random() - 0.5) * 0.4);
+    this.add(m, 0.5, (k) => { m.scale.setScalar(1 + k * 2); m.position.y += 0.01; m.material.opacity = 0.45 * (1 - k); });
+  }
+
   /** 투사체: 빛나는 실 꼬리를 단 화살/문양 */
   projectile(fromV, toFn, speed, color = '#ffe08a', size = 0.12) {
     const head = new THREE.Mesh(new THREE.SphereGeometry(size, 8, 6), new THREE.MeshBasicMaterial({ color, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));

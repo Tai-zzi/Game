@@ -212,7 +212,11 @@ export function useSkill(game, p, slot, aim, phase = 'press') {
   if (!p.alive) return '쓰러진 상태입니다';
   if (p.stun > 0) return '움직일 수 없습니다';
   if ((p.actionLock > 0 || p.charging || p.holding) && slot !== 'dodge') return 'busy';
-  if (slot === 'dodge') { p.charging = null; if (p.holding) endHold(game, p); }
+  if (slot === 'dodge') {
+    const st = p.stamina;
+    if (st && (st.locked || st.value < FEEL.move.dodgeCost)) return '기력이 부족합니다';
+    p.charging = null; if (p.holding) endHold(game, p);
+  }
 
   // 연계(combo): 창 안에 다시 누르면 다음 단계
   let stage = 0;
@@ -272,6 +276,7 @@ export function useSkill(game, p, slot, aim, phase = 'press') {
   if (cast.targetId && game.get(cast.targetId)?.kind === 'monster') p.targetId = cast.targetId;
   if (sk.ult) { p.fx.iframes = Math.max(p.fx.iframes || 0, S.windup + S.recovery); game.bus.emit('ultimate', { id: p.id, skillId, windup: S.windup }); }
 
+  if (slot === 'dodge' && p.stamina) { p.stamina.value -= FEEL.move.dodgeCost; p.stamina.lastUse = game.time; }
   if (sk.cast === 'charge') {
     p.charging = { ...cast, t0: game.time };
     p.actionLock = sk.charge.max + 0.6;

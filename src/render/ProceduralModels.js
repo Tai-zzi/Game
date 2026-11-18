@@ -246,7 +246,27 @@ function buildWorkbench(root) {
   return {};
 }
 
+function buildDesk(root) {
+  const w = wood();
+  root.add(mesh(new THREE.BoxGeometry(0.12, 1.5, 0.12), w, -0.5, 0.75, 0), mesh(new THREE.BoxGeometry(0.12, 1.5, 0.12), w, 0.5, 0.75, 0));
+  root.add(mesh(new THREE.BoxGeometry(1.3, 0.8, 0.06), std('#d9c7a0'), 0, 1.25, 0.04));
+  root.add(mesh(new THREE.SphereGeometry(0.09, 8, 6), std('#e8b04a', { emissive: '#a87a2a', emissiveIntensity: 0.8 }), 0.55, 1.75, 0.05));
+  return {};
+}
+function buildTask(root) {
+  const g = new THREE.Group();
+  g.add(new THREE.Mesh(new THREE.TorusGeometry(0.4, 0.03, 4, 24).rotateX(Math.PI / 2), glowMat('#ffd24a', 0.9)));
+  g.add(mesh(new THREE.BoxGeometry(0.45, 0.35, 0.45), std('#a8794a'), 0, 0.2, 0));
+  root.add(g);
+  return { glow: g };
+}
+
 export const MODEL_SPECS = {
+  prop_desk: { height: 1.8, build: buildDesk, prop: true },
+  prop_task: { height: 0.6, build: buildTask, prop: true },
+  npc_villager_a: { height: 1.7, build: (r) => buildHumanoid(r, { top: '#9a7a5a', bottom: '#4a3a2c', apron: '#d8c39a' }) },
+  npc_villager_b: { height: 1.75, build: (r) => buildHumanoid(r, { top: '#6a7a5a', bottom: '#3a3a30', hair: '#2a2420' }) },
+  npc_child: { height: 1.75, build: (r) => buildHumanoid(r, { top: '#c86a4a', bottom: '#4a4a5a', hair: '#7a4a2a' }) },
   player_guardian: { height: 1.8, build: buildGuardian },
   player_archer: { height: 1.8, build: buildArcher },
   player_elementalist: { height: 1.8, build: buildElementalist },

@@ -84,6 +84,14 @@ export class Minimap {
         }
       }
     }
+    // 목적지
+    if (p.waypoint) {
+      let x = (p.waypoint.x - p.pos.x) * scale, y = (p.waypoint.z - p.pos.z) * scale;
+      const l = Math.hypot(x, y), lim = W / 2 - 8;
+      if (l > lim) { x *= lim / l; y *= lim / l; }
+      ctx.fillStyle = '#ffd24a'; ctx.strokeStyle = '#3b2a1c'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(x, y, 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    }
     // 다리 상태 표시
     {
       const bz = HARVEN.bridge.z, bx = riverX(bz);

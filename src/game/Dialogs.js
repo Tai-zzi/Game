@@ -3,13 +3,17 @@ import { CONTRACTS } from '../data/contracts.js';
 import { CLASSES, CLASS_ORDER } from '../data/classes.js';
 import { ITEMS } from '../data/items.js';
 import { Relations } from './WorldState.js';
+import { AFFINITY } from '../data/npcs.js';
+import { HELP_TASKS, VILLAGERS, VILLAGER_HELP, HOUSEHOLDS } from '../data/households.js';
+import { HIDDEN_QUESTS } from '../data/hiddenQuests.js';
+import { relOf, relSummary, stance, trustOf, tierAtLeast } from './Relationships.js';
 
 /**
  * NPC 대화 구성 (로직 계층). UI는 결과를 그리기만 한다.
  * 반환: { npcId, title, lines[], terms?, options: [{ label, action?: command, page?: string, secondary? }] }
  * 원칙: 거절·기분은 어조와 선택형 의뢰만 바꾼다. 응급 치료·상점·직업 교육·기본 의뢰는 막지 않는다.
  */
-export function buildDialog(game, p, npcId, page = 'main') {
+function coreDialog(game, p, npcId, page = 'main') {
   const npc = NPCS[npcId];
   const C = game.contracts;
   const rel = Relations.get(p, npcId);
@@ -106,6 +110,7 @@ function contractOptions(game, p, id) {
 /** NPC 머리 위 표식: '?' 이 사람에게 할 일이 있음, '!' 맡을 수 있는 계약, '…' 이 사람의 계약 진행 중 */
 export function npcMarker(game, p, npcId) {
   const C = game.contracts, a = p.contracts.active, step = C.step(p);
+  if (Object.entries(p.hidden || {}).some(([id, s]) => s.status === 'offered' && HIDDEN_QUESTS[id].npc === npcId)) return '✦';
   if (a) {
     if (npcId === 'belo' && a.id === 'escort' && step?.type === 'escort' && !a.cartId) return '?';
     if (npcId === 'merchant' && a.id === 'repair' && step?.type === 'deliver') return '?';
@@ -117,4 +122,127 @@ export function npcMarker(game, p, npcId) {
     if (C.status(p, own.id) === 'available' && !a) return '!';
   }
   return '';
+}
+
+// ───────────────────────── 관계 · 일과 · 히든 퀘스트를 얹은 대화 ─────────────────────────
+
+const ESSENTIAL = new Set(['contractAccept', 'contractSwitch', 'contractAbandon', 'escortStart', 'deliver', 'report', 'emergencyHeal', 'openShop', 'changeClass']);
+
+/** 오늘의 기분: 게임 날짜·인물로 정해지는 운 + 욕구. 어조만 바꾼다 */
+export function moodOf(game, npcId) {
+  let h = game.life?.day ?? 0; for (const c of npcId) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  const roll = ((h % 100) / 100) * 2 - 1;
+  const a = game.life?.agents.get(npcId);
+  const needs = a ? (a.needs.hunger > 80 ? -0.4 : 0) + (a.needs.rest < 20 ? -0.4 : 0) + (a.needs.social > 70 ? 0.2 : 0) : 0;
+  const v = roll * 0.6 + needs;
+  return v > 0.35 ? '좋음' : v < -0.35 ? '언짢음' : '보통';
+}
+
+/**
+ * 대화 구성. opts.substitute = 창구(대신 응대) — 밤·자리 비움·큰 반감에도 필수 기능은 언제나 제공.
+ */
+export function buildDialog(game, p, npcId, page = 'main', opts = {}) {
+  const npc = NPCS[npcId];
+  const aff = AFFINITY[npcId];
+  const rel = relSummary(p, npcId);
+  const st = stance(p, npcId);
+  const close = { label: '대화를 마친다' };
+  const done = (d) => ({ ...d, rel, substitute: d.substitute || false });
+
+  // 주민 (가벼운 NPC)
+  if (npc.villager) return done(villagerDialog(game, p, npcId, page, rel, close));
+
+  // 창구: 필수 기능만, 대신 응대하는 사람 이름으로
+  const ent = game.life?.entity(npcId);
+  if (aff && (opts.substitute || st.substitute || ent?.hidden)) {
+    const core = coreDialog(game, p, npcId, page);
+    const clerk = aff.substitute;
+    const why = ent?.hidden ? `${npc.name}은(는) 지금 ${ent.activity?.name === '잠' ? '자고 있다' : '집에 있다'}.` : st.substitute ? (aff.tierLines[st.antiTier] || '') : `${npc.name}은(는) 자리를 비웠다.`;
+    return done({ ...core, substitute: true, title: `${clerk} · ${npc.name} 대신 응대`, lines: page === 'main' ? [why, `${clerk}: 필요한 일은 제가 똑같이 처리해 드려요.`] : core.lines,
+      options: core.options.filter((o) => !o.action || ESSENTIAL.has(o.action.type) || o.page?.startsWith('offer:')).concat(core.options.some((o) => !o.action && !o.page) ? [] : [close]) });
+  }
+  if (!aff) return done(coreDialog(game, p, npcId, page)); // 교육 담당자 등
+
+  // 관계 페이지
+  if (page === 'belief') {
+    const bt = aff.beliefTalk;
+    return done({ npcId, title: `${npc.title} · 깊은 이야기`, lines: [bt.prompt], options: bt.options.map((o) => ({ label: o.label, action: { type: 'talkBelief', npcId, tag: o.tag }, page: `beliefReply:${o.tag}` })) });
+  }
+  if (page.startsWith('beliefReply:')) {
+    const o = aff.beliefTalk.options.find((x) => x.tag === page.split(':')[1]);
+    return done({ npcId, title: npc.title, lines: [o.reply], options: [{ label: '돌아간다', page: 'main' }] });
+  }
+  if (page === 'gift') {
+    const items = Object.entries(p.inventory).filter(([id, n]) => n > 0 && ITEMS[id]?.type !== 'keepsake' && ITEMS[id]?.type !== 'gear');
+    return done({ npcId, title: `${npc.name}에게 선물`, lines: [items.length ? '무엇을 건넬까? (하루 3번까지, 같은 물건은 점점 덜 반긴다)' : '건넬 만한 물건이 없다.'],
+      options: [...items.slice(0, 7).map(([id, n]) => ({ label: `${ITEMS[id].name} (${n})`, action: { type: 'gift', npcId, item: id }, page: 'giftReply' })), { label: '그만둔다', page: 'main', secondary: true }] });
+  }
+  if (page === 'giftReply') return done({ npcId, title: npc.title, lines: [aff.gifts.note ? '(반응을 살핀다)' : '(받아 든다)'], options: [{ label: '다른 것도 건넨다', page: 'gift' }, { label: '돌아간다', page: 'main' }] });
+  if (page === 'secret') {
+    const sec = aff.secrets.filter((s) => trustOf(relOf(p, npcId)) >= s.minTrust && rel.rap >= s.minRapport);
+    return done({ npcId, title: `${npc.name} · 털어놓은 이야기`, lines: sec.map((s) => s.text), options: [{ label: '조용히 듣는다', page: 'main' }] });
+  }
+  if (page === 'refuse') return done({ npcId, title: npc.title, lines: [refusal(npcId)], options: [{ label: '알겠다', page: 'main' }] });
+  if (page === 'relQuest') {
+    const q = aff.relQuest;
+    return done({ npcId, title: `${npc.name} · ${q.name}`, lines: [q.text], options: [{ label: '해 보겠다', action: { type: 'relQuest', npcId }, page: 'main' }, { label: '다음에', page: 'main', secondary: true }] });
+  }
+  if (page.startsWith('hidden:')) return done(hiddenDialog(game, p, npcId, page.slice(7), close));
+
+  // 기본 대화 + 관계 선택지
+  const core = coreDialog(game, p, npcId, page);
+  if (page !== 'main') return done(core);
+  const mood = moodOf(game, npcId);
+  const lines = [...core.lines];
+  const tierLine = aff.tierLines[rel.tier];
+  if (tierLine && rel.tier !== '낯섦' && !lines.includes(tierLine)) lines.unshift(tierLine);
+  if (aff.moodLines?.[mood]) lines.unshift(aff.moodLines[mood]);
+  const extra = [];
+  for (const [hid, s] of Object.entries(p.hidden || {})) {
+    if (HIDDEN_QUESTS[hid].npc !== npcId) continue;
+    if (s.status === 'offered') extra.push({ label: '… (따로 할 이야기가 있는 것 같다)', page: `hidden:${hid}` });
+    const step = HIDDEN_QUESTS[hid].steps[s.step];
+    if (s.status === 'active' && (step?.type === 'talk' || step?.type === 'choice')) extra.push({ label: `「${HIDDEN_QUESTS[hid].name}」 이야기를 잇는다`, page: `hidden:${hid}` });
+  }
+  if (st.refuseOptional) extra.push({ label: '부탁할 일이 있다', page: 'refuse', secondary: true });
+  else {
+    if (relOf(p, npcId).daily.talk !== game.life?.day) extra.push({ label: `${aff.beliefTalk.q} (오늘의 대화)`, page: 'belief' });
+    extra.push({ label: '선물을 건넨다', page: 'gift' });
+    const t = HELP_TASKS[npcId];
+    if (t && ent && t.activity.includes(ent.activity?.id) && relOf(p, npcId).daily.help !== game.life?.day && !p.helpTask) extra.push({ label: `일을 돕겠다고 한다: ${t.name}`, action: { type: 'helpStart', npcId } });
+    if (aff.relQuest && tierAtLeast(rel.aff, aff.relQuest.minTier) && !relOf(p, npcId).tags.includes(aff.relQuest.tag)) extra.push({ label: `${aff.relQuest.name} (선택형 부탁)`, page: 'relQuest' });
+    if (aff.secrets.some((s) => trustOf(relOf(p, npcId)) >= s.minTrust && rel.rap >= s.minRapport)) extra.push({ label: '조금 더 깊은 이야기를 청한다', page: 'secret' });
+    if (npcId === 'mora') extra.push({ label: `약초 연고를 받는다 (약초 ${Math.floor(game.life?.world.herbs ?? 0)})`, action: { type: 'herbSalve' } });
+  }
+  const base = core.options.slice(0, -1);
+  return done({ ...core, lines, mood, options: [...base, ...extra, core.options[core.options.length - 1]] });
+}
+
+function refusal(npcId) {
+  const r = { haila: '지금은 개인적인 부탁은 받기 어려워요. 계약은 서기가 그대로 안내할 거예요.', belo: '지금은 아니야. 일은 조장한테 받아.', mora: '지금은 제 마음이 따라가지 않아요. 아픈 데가 있으면 조수가 바로 볼 거예요.', merchant: '오늘은 장사만 해요. 물건은 점원이 똑같이 팔아요.' };
+  return r[npcId] || '지금은 어렵다.';
+}
+
+function hiddenDialog(game, p, npcId, hid, close) {
+  const q = HIDDEN_QUESTS[hid], s = p.hidden[hid], npc = NPCS[npcId];
+  const step = q.steps[s.step];
+  if (s.status === 'offered') return { npcId, title: `${npc.name} · ???`, lines: [q.discovery], options: [{ label: '듣겠다', action: { type: 'hiddenAccept', id: hid }, page: `hidden:${hid}` }, { label: '지금은 아니다', page: 'main', secondary: true }] };
+  if (step?.type === 'talk') return { npcId, title: `${npc.name} · ${q.name}`, lines: step.text, options: [{ label: '…알겠다', action: { type: 'hiddenTalk', id: hid }, page: 'main' }] };
+  if (step?.type === 'choice') return { npcId, title: `${npc.name} · ${q.name}`, lines: [step.prompt], options: step.options.map((o, i) => ({ label: o.label, action: { type: 'hiddenChoose', id: hid, index: i, npcId } })) };
+  if (step?.type === 'visit') return { npcId, title: `${npc.name} · ${q.name}`, lines: [`(${step.label})`], options: [{ label: '그만둔다', action: { type: 'hiddenAbandon', id: hid }, secondary: true }, close] };
+  return { npcId, title: npc.name, lines: ['…'], options: [close] };
+}
+
+function villagerDialog(game, p, vid, page, rel, close) {
+  const v = VILLAGERS[vid];
+  const hh = HOUSEHOLDS[v.household];
+  const ent = game.life?.entity(vid);
+  const fam = hh.members.filter((m) => m !== vid).map((m) => NPCS[m].name).join(', ');
+  const lines = [v.lines[(game.life?.day ?? 0) % v.lines.length]];
+  if (ent?.activity) lines.push(`(${ent.activity.name} 중이다 · ${hh.name}${fam ? ` — ${fam}` : ''})`);
+  const opts = [];
+  const h = VILLAGER_HELP[vid];
+  if (h && !relOf(p, vid).tags.includes(h.tag) && (!h.needsClue || (p.records.clues || []).includes(h.needsClue))) opts.push({ label: h.label, action: { type: 'helpVillager', npcId: vid } });
+  opts.push(close);
+  return { npcId: vid, title: v.title, lines, options: opts };
 }

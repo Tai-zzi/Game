@@ -33,6 +33,7 @@ export class Dialog {
     this.el.classList.remove('hidden');
     $('dlg-name').textContent = NPCS[data.npcId].name;
     $('dlg-title').textContent = data.title;
+    this.renderRel(data);
     const terms = $('dlg-terms');
     terms.classList.add('hidden');
     if (data.terms) {
@@ -41,6 +42,18 @@ export class Dialog {
         + (r ? `<div><b>보상</b> 경험치 ${r.xp} · ${r.gold}골드 · 공공 기여 ${r.contribution} <small>(검증 전 예시)</small></div>` : '');
     }
     this.showLine();
+  }
+
+  /** 관계 패널: 친밀·교감·반감·신뢰 막대, 단계, 기억 3개 */
+  renderRel(data) {
+    const el = $('dlg-rel');
+    const r = data.rel;
+    if (!r || data.substitute) { el.classList.add('hidden'); return; }
+    el.classList.remove('hidden');
+    const bar = (label, v, cls, max = 100) => `<div class="rb"><span>${label}</span><i><b class="${cls}" style="width:${Math.max(0, Math.min(100, (v / max) * 100))}%"></b></i><em>${v}</em></div>`;
+    el.innerHTML = `<div class="rt">${r.tier}${r.antiTier ? ` · <span class="anti">${r.antiTier}</span>` : ''}${data.mood && data.mood !== '보통' ? ` · 오늘 ${data.mood}` : ''}</div>`
+      + bar('친밀도', r.aff, 'aff') + bar('교감도', r.rap, 'rap') + bar('반감도', r.anti, 'anti') + `<div class="rb"><span>신뢰</span><em class="tr">${r.trust > 0 ? '+' : ''}${r.trust}</em></div>`
+      + (r.memories.length ? `<div class="mem">${r.memories.map((m) => `<div>· ${m}</div>`).join('')}</div>` : '');
   }
 
   showLine() {
@@ -88,7 +101,7 @@ export class Dialog {
   choose(o) {
     const npcId = this.data.npcId;
     if (o.action) this.onAction(o.action);
-    if (o.page) this.show(this.getPage(npcId, o.page));
+    if (o.page) this.show(this.getPage(npcId, o.page, { substitute: this.data.substitute }));
     else this.close();
   }
 

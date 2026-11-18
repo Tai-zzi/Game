@@ -77,7 +77,7 @@ export class EntityViews {
     this.views.delete(id);
   }
 
-  pickables() { const r = []; for (const v of this.views.values()) if (v.dying < 0) r.push(v.pick); return r; }
+  pickables() { const r = []; for (const v of this.views.values()) if (v.dying < 0 && v.model.root.visible) r.push(v.pick); return r; }
 
   positionOf(id, yOffset = 0, out = new THREE.Vector3()) {
     const v = this.views.get(id);
@@ -104,7 +104,12 @@ export class EntityViews {
       let rot = e.rot;
       if (e.kind === 'npc' && v.faceUntil > this.game.time && pl) rot = Math.atan2(pl.pos.x - e.pos.x, pl.pos.z - e.pos.z);
       root.rotation.y += wrapAngle(rot - root.rotation.y) * Math.min(1, dt * (e.kind === 'npc' ? 5 : 14));
-      v.model.setLocomotion(e.fx?.block > 0 ? 'block' : e.moving ? 'run' : 'idle');
+      const sprint = e.kind === 'player' && e.moving && this.game.sprinting?.(e);
+      v.model.setLocomotion(e.fx?.block > 0 ? 'block' : e.moving ? (sprint ? 'sprint' : 'run') : 'idle');
+      if (e.kind === 'npc') {
+        root.visible = !e.hidden;
+        v.model.setActivity(!e.moving && e.activity?.anim ? e.activity.anim : null);
+      }
       if (v.born < 1 && v.dying < 0) { v.born = Math.min(1, v.born + dt * 2.5); root.scale.setScalar(easeOutBack(v.born) * v.scale); }
       if (v.dying >= 0) {
         v.dying += dt;

@@ -37,6 +37,7 @@ export class MonsterAI {
     for (const k in ai.cd) ai.cd[k] = Math.max(0, ai.cd[k] - dt);
     m.moving = false;
     if (m.stun > 0) { m.stun -= dt; this.cancelWindup(m); return; }
+    if (ai.dummy) { m.moving = false; return; }
     const target = g.get(ai.targetId);
     const homeDist = dist2D(m.pos, m.home);
     const sm = speedMult(m);

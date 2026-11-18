@@ -1,6 +1,7 @@
 import { ITEMS, SHOP_STOCK, EQUIP_SLOTS } from '../data/items.js';
 import { ITEM_AI } from '../data/aiAssets.js';
 import { CLASSES } from '../data/classes.js';
+import { priceOf, inStock } from '../game/Shop.js';
 
 const $ = (id) => document.getElementById(id);
 const STAT = { atk: '공격력', def: '방어력', maxHp: '최대 체력', critChance: '치명타' };
@@ -88,8 +89,8 @@ export class ShopUI {
   renderShop(p) {
     const stock = SHOP_STOCK.merchant;
     const rows = this.tab === 'buy'
-      ? stock.map((id) => { const it = ITEMS[id]; const bad = it.classes && !it.classes.includes(p.classId);
-        return `<div class="row ${p.gold < it.price ? 'poor' : ''} ${bad ? 'other' : ''}" data-item="${id}">${this.icon(id)}<span class="nm">${it.name}</span><span class="pr">${it.price}골드</span></div>`; }).join('')
+      ? stock.map((id) => { const it = ITEMS[id]; const bad = it.classes && !it.classes.includes(p.classId); const pr = priceOf(this.game, p, id); const oos = inStock(this.game, id) !== true;
+        return `<div class="row ${p.gold < pr ? 'poor' : ''} ${bad || oos ? 'other' : ''}" data-item="${id}">${this.icon(id)}<span class="nm">${it.name}${oos ? ' <small>(다리 끊김 — 입고 대기)</small>' : ''}</span><span class="pr">${pr}골드${pr < it.price ? ' ♥' : ''}</span></div>`; }).join('')
       : Object.entries(p.inventory).filter(([id, n]) => n > 0 && ITEMS[id]?.sell && ITEMS[id].type !== 'keepsake')
         .map(([id, n]) => `<div class="row" data-item="${id}">${this.icon(id)}<span class="nm">${ITEMS[id].name} x${n}</span><span class="pr">${ITEMS[id].sell}골드</span></div>`).join('') || '<div class="qt-obj">팔 물건이 없습니다</div>';
     this.shop.innerHTML = `<div class="qt-title">${this.game.player() && '현지 상인'} <small>· 골드만 받습니다</small><span class="x">✕</span></div>

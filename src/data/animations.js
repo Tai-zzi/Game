@@ -31,11 +31,14 @@ export const MODEL_RIGS = {
   npc_mora: { rig: 'Rogue', show: ['Rogue_Cape'], style: 'npc', tint: '#d8c0e8' },
   npc_merchant: { rig: 'Barbarian', show: ['Mug', 'Barbarian_Hat'], style: 'npc', tint: '#f0d8a8' },
   npc_trainer: { rig: 'Knight', show: ['Knight_Cape'], style: 'npc', tint: '#b8c0d0' },
+  npc_villager_a: { rig: 'Rogue', show: [], style: 'npc', tint: '#e0c8a8' },
+  npc_villager_b: { rig: 'Barbarian', show: [], style: 'npc', tint: '#c8d0b0' },
+  npc_child: { rig: 'Rogue_Hooded', show: [], style: 'npc', tint: '#f0b8a0' },
 };
 
 /** 스타일별 기본 상태 클립 */
 export const STYLES = {
-  swordShield: { idle: 'Idle', run: 'Running_A', block: 'Blocking', hit: ['Hit_A', 'Hit_B'], death: 'Death_A', dodge: 'Dodge_Forward',
+  swordShield: { idle: 'Idle', run: 'Running_A', sprint: 'Running_B', block: 'Blocking', hit: ['Hit_A', 'Hit_B'], death: 'Death_A', dodge: 'Dodge_Forward',
     combo: ['1H_Melee_Attack_Slice_Diagonal', '1H_Melee_Attack_Slice_Horizontal', '1H_Melee_Attack_Stab'] },
   crossbow: { idle: 'Idle', run: 'Running_B', block: 'Idle', hit: ['Hit_A', 'Hit_B'], death: 'Death_B', dodge: 'Dodge_Forward', combo: ['2H_Ranged_Shoot'] },
   staff: { idle: 'Idle', run: 'Running_A', block: 'Idle', hit: ['Hit_A', 'Hit_B'], death: 'Death_A', dodge: 'Dodge_Forward', combo: ['Spellcast_Shoot'] },

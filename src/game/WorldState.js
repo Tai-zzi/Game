@@ -1,3 +1,4 @@
+import { relOf, relEvent } from './Relationships.js';
 import { BRIDGE_EVENT } from '../data/contracts.js';
 
 /**
@@ -8,22 +9,12 @@ import { BRIDGE_EVENT } from '../data/contracts.js';
  * 지금은 로컬에서 서버 역할을 흉내 낸다. Phase 3에서 서버로 이동.
  */
 
-// ───── 1) 개인 관계 ─────
+// ───── 1) 개인 관계 ───── (Relationships.js 로 위임: 친밀도·교감도·반감도·신뢰·기억 태그)
 export const Relations = {
-  get(p, npcId) { return (p.relations[npcId] ||= { trust: 0, tags: [] }); },
-  has(p, npcId, tag) { return Relations.get(p, npcId).tags.includes(tag); },
-  tag(game, p, npcId, tag, trust = 0) {
-    const r = Relations.get(p, npcId);
-    if (!r.tags.includes(tag)) r.tags.push(tag);
-    r.trust += trust;
-    game.bus.emit('relation', { npcId, tag, trust: r.trust });
-  },
-  /** 서로 배타적인 태그 교체 (예: 연맹_가입 ↔ 독립_계약자) */
-  swap(game, p, npcId, remove, add, trust = 0) {
-    const r = Relations.get(p, npcId);
-    r.tags = r.tags.filter((t) => t !== remove);
-    Relations.tag(game, p, npcId, add, trust);
-  },
+  get: (p, npcId) => relOf(p, npcId),
+  has: (p, npcId, tag) => relOf(p, npcId).tags.includes(tag),
+  tag(game, p, npcId, tag) { relEvent(game, p, npcId, tag); },
+  swap(game, p, npcId, remove, add) { const r = relOf(p, npcId); r.tags = r.tags.filter((t) => t !== remove); relEvent(game, p, npcId, add); },
 };
 
 // ───── 2) 지역 공공 상태 ─────

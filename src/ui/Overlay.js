@@ -27,6 +27,14 @@ export class Overlay {
     bus.on('absorb', ({ targetId, amount }) => this.float(targetId, `보호막 ${amount}`, 'healed', 1.9));
     bus.on('xp', ({ amount }) => this.float(game.playerId, `+${amount} 경험치`, 'xp', 2.4));
     bus.on('loot', ({ itemId, count }) => this.float(game.playerId, `${ITEMS[itemId]?.name || itemId} +${count}`, 'loot', 2.1));
+    // 말풍선 (주민 잡담·가족·히든 장면)
+    bus.on('npcBubble', ({ id, text }) => this.bubble(id, text));
+    bus.on('npcSay', ({ npcId, text }) => { const e = [...game.entities.values()].find((x) => x.npcId === npcId); if (e && text) this.bubble(e.id, text); });
+    bus.on('affinity', ({ npcId, aff, rap }) => {
+      const e = [...game.entities.values()].find((x) => x.npcId === npcId);
+      const parts = [aff ? `친밀 ${aff > 0 ? '+' : ''}${Math.round(aff * 10) / 10}` : '', rap ? `교감 +${Math.round(rap)}` : ''].filter(Boolean).join(' · ');
+      if (parts) this.float(e && !e.hidden ? e.id : game.playerId, `♥ ${parts}`, aff < 0 ? 'callout' : 'affinity', 2.3, { pop: 1.4, still: true });
+    });
     bus.on('heal', ({ targetId, amount }) => { if (amount >= 2) this.float(targetId, `+${amount}`, 'healed', 1.8); });
     bus.on('evade', ({ targetId }) => this.float(targetId, '회피', 'xp', 1.8));
     bus.on('blocked', ({ targetId }) => this.float(targetId, '차단', 'xp', 1.8));
@@ -43,6 +51,29 @@ export class Overlay {
     const N = FEEL.numbers;
     this.floats.push({ d, pos, t: 0, life: still ? N.life * 1.2 : N.life, dx: still ? 0 : (Math.random() < 0.5 ? -1 : 1) * (20 + Math.random() * N.arc), pop, still });
     if (this.floats.length > 60) { const f = this.floats.shift(); f.d.remove(); }
+  }
+
+  bubble(entityId, text) {
+    const old = this.bubbles?.get(entityId);
+    if (old) old.d.remove();
+    (this.bubbles ||= new Map());
+    const d = document.createElement('div');
+    d.className = 'bubble';
+    d.textContent = text;
+    this.el.appendChild(d);
+    this.bubbles.set(entityId, { d, t: 0, life: 2.6 + text.length * 0.05 });
+  }
+
+  updateBubbles(dt) {
+    if (!this.bubbles) return;
+    for (const [id, b] of this.bubbles) {
+      b.t += dt;
+      const v = this.views.views.get(id);
+      if (!v || b.t > b.life || !v.model.root.visible) { b.d.remove(); this.bubbles.delete(id); continue; }
+      const s = this.project(this.views.positionOf(id, v.model.height * v.scale + 0.9, this.v3 || (this.v3 = new THREE.Vector3())));
+      b.d.style.transform = `translate(calc(-50% + ${s.x | 0}px), calc(-100% + ${s.y | 0}px))`;
+      b.d.style.opacity = String(Math.min(1, (b.life - b.t) * 3));
+    }
   }
 
   project(pos) {
@@ -80,6 +111,7 @@ export class Overlay {
       f.d.style.opacity = String(1 - Math.max(0, k - 0.65) / 0.35);
       if (f.t >= f.life) { f.d.remove(); this.floats.splice(i, 1); }
     }
+    this.updateBubbles(dt);
     const player = this.game.player();
     for (const e of this.game.entities.values()) {
       if (e.kind === 'player') continue;
@@ -87,6 +119,7 @@ export class Overlay {
       if (!view) continue;
       const pl = this.plate(e);
       const near = player && Math.hypot(e.pos.x - player.pos.x, e.pos.z - player.pos.z) < 32;
+      if (e.hidden) { if (pl.style.display !== 'none') pl.style.display = 'none'; continue; }
       const show = near && (e.kind === 'npc' || e.kind === 'cart' || (e.kind === 'monster' ? e.alive && (e.hp < e.stats.maxHp || player.targetId === e.id || e.ai.state !== 'idle' || e.marks.n > 0) : Math.hypot(e.pos.x - player.pos.x, e.pos.z - player.pos.z) < 12));
       if (!show) { if (pl.style.display !== 'none') pl.style.display = 'none'; continue; }
       const s = this.project(this.views.positionOf(e.id, view.model.height + 0.45, this.v2 || (this.v2 = new THREE.Vector3())));

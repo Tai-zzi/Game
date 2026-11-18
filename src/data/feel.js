@@ -25,6 +25,8 @@ export const FEEL = {
   sfx: { whoosh: true, impact: true, tail: true, volume: 0.5 },
   // 위치 보너스
   positional: { backDamage: 0.1, backCrit: 0.1, headStagger: 0.25, backAngle: 2.1, headAngle: 1.0 },
+  // 이동: 질주(Shift)와 기력 — 구르기와 같은 기력을 쓴다
+  move: { sprintMult: 1.6, drain: 16, combatDrain: 26, regen: 22, regenDelay: 0.6, dodgeCost: 25, unlockAt: 20, max: 100, fovKick: 4 },
   // 무력화 상태
   groggy: { duration: 4, damageTaken: 1.2 },
 };

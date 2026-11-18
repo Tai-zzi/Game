@@ -78,7 +78,7 @@ export class HUD {
     for (const [code, slot] of Object.entries(keymap.slots)) if (!inv[slot]) inv[slot] = KEYNAME(code);
     for (const [slot, el] of Object.entries(this.slots)) el.key.textContent = inv[slot] || '';
     const move = keymap.move.up.includes('KeyW') ? 'WASD 이동' : '우클릭/좌클릭 이동 · 꾹 누르면 계속 이동';
-    $('keyhint').innerHTML = `${move}<br>좌클릭 적: 연타 공격 (${inv.basic}) · 사람/물건: 상호작용 G<br>Space 구르기 · ${inv.ult} 각성기 · T 회복약 · Tab 대상 · I 소지품<br>F2 키 배치 (${keymap.label}) · F3 그래픽 품질`;
+    $('keyhint').innerHTML = `${move} · Shift 질주<br>좌클릭 적: 연타 공격 (${inv.basic}) · 사람/물건: 상호작용 G<br>Space 구르기 · ${inv.ult} 각성기 · T 회복약 · Tab 대상<br>I 소지품 · M 지도 · K 인연 · F2 키 배치 (${keymap.label}) · F3 그래픽`;
   }
 
   log(text, kind = 'system') {
@@ -129,8 +129,8 @@ export class HUD {
     const cls = CLASSES[p.classId];
     this.set('name', p.name, (v) => { $('pf-name').textContent = v; });
     this.set('lvl', p.level, (v) => { $('pf-level').textContent = `Lv ${v}`; });
-    this.set('cls', `${p.classId}|${p.affiliation}`, () => {
-      $('pf-class').textContent = `${cls.name} (${cls.role}) · ${AFFIL[p.affiliation] || '소속 미정'} · ${ORIGINS[p.origin]?.name || ''}`;
+    this.set('cls', `${p.classId}|${p.affiliation}|${p.title}`, () => {
+      $('pf-class').textContent = `${cls.name} (${cls.role}) · ${AFFIL[p.affiliation] || '소속 미정'} · ${ORIGINS[p.origin]?.name || ''}${p.title ? ` · 「${p.title}」` : ''}`;
     });
     const hp = Math.ceil(p.hp);
     this.set('hp', `${hp}/${p.stats.maxHp}`, (v) => { $('pf-hp').style.width = `${(hp / p.stats.maxHp) * 100}%`; $('pf-hp-text').textContent = v; });
@@ -159,9 +159,14 @@ export class HUD {
     this.set('target', t ? `${t.id}:${Math.ceil(t.hp)}:${t.alive}:${t.marks?.n || 0}:${Math.round(t.stagger?.value ?? -1)}:${t.groggy > 0}` : '', () => this.renderTarget(t));
     this.set('dead', !p.alive, (v) => $('death-screen').classList.toggle('hidden', !v));
     this.set('coords', `${Math.round(p.pos.x)}, ${Math.round(p.pos.z)}`, (v) => { $('coords').textContent = v; });
+    // 시계 · 기력
+    const life = g.life;
+    if (life) this.set('clock', life.clockText, (v) => { $('clock').innerHTML = `${life.isNight ? '☾' : '☀'} ${v} <small>${life.day}일째</small>`; });
+    const st = p.stamina;
+    if (st) this.set('stam', `${Math.round(st.value)}:${st.locked}`, () => { $('stamina-fill').style.width = `${st.value}%`; $('stamina').classList.toggle('locked', st.locked); $('stamina').classList.toggle('full', st.value >= 99.5); });
     // 계약 추적
     const prog = g.contracts.progress(p);
-    this.set('contract', JSON.stringify(prog), () => this.renderContract(prog));
+    this.set('contract', JSON.stringify([prog, p.hidden, p.helpTask?.left]), () => this.renderContract(prog));
     // 공공 상태 (서버 공유 영역)
     const b = g.publicState.bridge;
     this.set('public', `${b.state}|${JSON.stringify(b.contrib)}`, () => this.renderPublic(b));
@@ -197,6 +202,15 @@ export class HUD {
 
   renderContract(prog) {
     const el = $('quest-tracker');
+    const hid = this.game.hidden?.tracker(this.game.player()) || [];
+    const hidHtml = hid.map((h) => `<div class="qt-title hidden-q">✦ ${h.name}</div><div class="qt-obj current">▶ ${h.label}</div>`).join('');
+    const help = this.game.player().helpTask;
+    const helpHtml = help ? `<div class="qt-title">돕기 · ${NPCS[help.npcId].name}</div><div class="qt-obj current">▶ 남은 작업 ${help.left}</div>` : '';
+    if (hidHtml || helpHtml) { this.renderContractInner(prog, el); el.innerHTML += helpHtml + hidHtml; return; }
+    this.renderContractInner(prog, el);
+  }
+
+  renderContractInner(prog, el) {
     if (!prog) { el.innerHTML = '<div class="qt-title">진행 중인 계약 없음</div><div class="qt-obj">거점 사람들에게 말을 걸어 보세요. 하지 않아도 됩니다.</div>'; return; }
     el.innerHTML = `<div class="qt-title">${prog.name} <small>· ${NPCS[prog.giver].name}</small></div>` +
       prog.steps.map((s) => `<div class="qt-obj ${s.state}">${s.state === 'done' ? '✓' : s.state === 'current' ? '▶' : '·'} ${s.label}${s.detail ? ` <small>${s.detail}</small>` : ''}</div>`).join('');

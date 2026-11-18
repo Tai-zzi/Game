@@ -121,17 +121,17 @@ console.log('5) 다리 상태 전환 (공공 결산)');
   ok(g2.publicState.bridge.state === 'detour', '수리 자재 비중이 낮으면 → 임시 우회로');
 }
 
-console.log('6) 저장 형식 v2 / 구 저장 이관 / 변경 요약');
+console.log('6) 저장 형식 v3 / 구 저장 이관 / 변경 요약');
 {
   const { g } = newGame('archer', 'port');
   const s = g.serialize();
-  ok(s.version === 2 && s.character && s.personal && s.public && s.world, '저장: character / personal / public / world 층 분리');
+  ok(s.version === 3 && s.character && s.personal && s.public && s.world, '저장: character / personal / public / world 층 분리');
   ok(s.character.inventory.rope === 1, '출신 소지품(항구 노동자 → 밧줄)');
   s.savedAt = Date.now() - 600 * 1000;
   const { g: g2 } = newGame('archer', 'port', s);
   ok(g2.offlineGain > 0 && g2.changesSinceLastSeen().length > 0, `부재 중 진행 +${g2.offlineGain}, 변경 요약 ${g2.changesSinceLastSeen().length}줄`);
   const old = migrateSave({ name: '옛사람', classId: 'apprentice', level: 4, xp: 10, quests: {}, version: 1 });
-  ok(old.version === 2 && old.needsProfile && old.character.level === 4, '구 저장(v1) → 이름·레벨 유지, 출신·직업 다시 선택');
+  ok(old.version === 3 && old.needsProfile && old.character.level === 4, '구 저장(v1) → 이름·레벨 유지, 출신·직업 다시 선택');
 }
 
 console.log('7) 상점 · 소지품 · 장비');
@@ -281,6 +281,127 @@ console.log('11) 시전 방식 · 카운터 · 무력화 · 보스 단계');
   ok(phase === 'staggerCheck', '체력 50%: 무력화 확인 단계 시작');
   const elite = g2.livingMonsters().find((x) => x.monsterId === 'tangled_alpha');
   ok(!!elite && elite.superArmor && elite.stagger, '엘리트 「엉킨 늑대우두머리」: 슈퍼아머 + 무력화 게이지');
+}
+
+console.log('12) 관계 (친밀·교감·반감·신뢰)');
+{
+  const { relOf, giveGift, relSummary, stance } = await import('../src/game/Relationships.js');
+  const { g, p } = newGame('guardian');
+  p.inventory.thread_ball = 10; p.inventory.lumber = 10;
+  const gains = [];
+  for (let i = 0; i < 3; i++) { const r = giveGift(g, p, 'mora', 'thread_ball'); gains.push(r.delta); }
+  ok(gains[0] > gains[1] && gains[1] > gains[2], `선물 체감: ${gains.map((x) => x.toFixed(2)).join(' → ')}`);
+  ok(typeof giveGift(g, p, 'mora', 'thread_ball') === 'string', '하루 선물 상한(3회)');
+  g.life.day++;
+  ok(typeof giveGift(g, p, 'mora', 'thread_ball') === 'object', '다음 날 다시 선물 가능');
+  ok(relSummary(p, 'mora').known.length > 0, '반응을 보고 좋아하는 것을 알게 됨 (인연 창)');
+  // 기억 태그
+  g.command({ type: 'contractAccept', id: 'escort' }); g.command({ type: 'contractAbandon' });
+  ok(relSummary(p, 'belo').memories.includes('약속한 호송을 포기함') && relOf(p, 'belo').broken === 1, '기억 태그: 「약속한 호송을 포기함」, 어긴 약속 → 신뢰 하락');
+  // 금지선: 친밀도 최대여도
+  const mr = relOf(p, 'mora'); mr.aff = 100; mr.rap = 100;
+  const d = g.dialog('mora', 'emotion');
+  ok(/안 해요/.test(d.lines.join('')), '금지선: 친밀도 100 에서도 감정 조작 거절');
+  // 반감 최대에서도 필수 기능
+  for (const id of ['haila', 'belo', 'mora', 'merchant']) relOf(p, id).anti = 100;
+  ok(stance(p, 'mora').substitute, '반감 최대 → 대신 응대(조수)');
+  ok(g.dialog('mora').options.some((o) => o.action?.type === 'emergencyHeal'), '반감 최대에도 응급 치료 제공');
+  ok(g.dialog('merchant').options.some((o) => o.action?.type === 'openShop'), '반감 최대에도 상점 제공');
+  ok(g.dialog('haila').options.some((o) => o.page?.startsWith('offer:') || o.action?.type === 'contractAccept'), '반감 최대에도 계약 안내');
+  ok(!g.dialog('mora').options.some((o) => o.page === 'gift'), '반감이 크면 선택형 부탁(선물·잡담)은 받지 않음');
+}
+
+console.log('13) 살아 있는 NPC (하루 일과·가족·창구)');
+{
+  const { scheduledAt } = await import('../src/game/NpcLife.js');
+  const { PLACES } = await import('../src/data/households.js');
+  const { g, p } = newGame('guardian');
+  teleport(p, 0, 8);
+  const seen = {};
+  const belo = g.life.entity('belo');
+  for (let i = 0; i < 1440 / 15; i++) { // 15분씩 하루
+    g.life.minutes += 15; g.life.update(0); g.life.decide(g.life.agents.get('belo'), belo);
+    seen[g.life.agents.get('belo').current.activity] = true;
+  }
+  ok(seen.drill && seen.sleep && seen.eat, `벨로의 하루: ${Object.keys(seen).join(', ')}`);
+  ok(scheduledAt('mora', 14).activity === 'gather' && scheduledAt('mora', 23).activity === 'sleep', '모라: 오후 약초 채집 → 밤 잠');
+  // 밤에는 가족이 집으로
+  g.life.minutes = Math.floor(g.life.minutes / 1440) * 1440 + 22 * 60;
+  for (let i = 0; i < 90 * 30; i++) g.update(1 / 30); // 90초 (가까운 NPC 는 걸어서)
+  const home = PLACES.home_harck;
+  const harck = ['belo', 'lise', 'toby'].map((id) => g.life.entity(id));
+  ok(harck.every((e) => Math.hypot(e.pos.x - home.x, e.pos.z - home.z) < 3 && e.hidden), '밤: 하르크 가족 모두 집 안');
+  // 밤 + 창구
+  const d = g.dialog('mora', 'main');
+  ok(d.substitute && d.options.some((o) => o.action?.type === 'emergencyHeal'), '밤(모라 잠): 진료소 종 → 조수가 응급 치료');
+  const desks = [...g.entities.values()].filter((e) => e.kind === 'desk');
+  ok(desks.length === 4, '필수 기능 창구 4곳 (게시판·모집판·진료소 종·좌판 장부)');
+  // 접속하지 않은 시간: 감소 없음
+  const s = g.serialize(); const before = JSON.stringify(s.personal.relations);
+  s.savedAt = Date.now() - 3 * 24 * 3600 * 1000;
+  const { g: g2, p: p2 } = newGame('guardian', 'farm', s);
+  ok(JSON.stringify(g2.serialize().personal.relations) === before, '3일 접속하지 않아도 관계 수치 그대로 (감소 없음)');
+  ok(g2.life.day > g.life.day, `부재 중 시계만 진행 (${g.life.day}일 → ${g2.life.day}일)`);
+}
+
+console.log('14) 일 돕기 · 히든 퀘스트');
+{
+  const { relOf } = await import('../src/game/Relationships.js');
+  const { g, p } = newGame('guardian');
+  const merchant = g.life.entity('merchant');
+  g.life.minutes = 10 * 60; g.life.snap('merchant');
+  ok(merchant.activity.id === 'stall', '상인: 오전 좌판 장사');
+  g.command({ type: 'helpStart', npcId: 'merchant' });
+  ok(!!p.helpTask, '일 돕기 시작 (상자 나르기)');
+  const a0 = relOf(p, 'merchant').aff;
+  for (const id of [...p.helpTask.spots]) { const e = g.get(id); teleport(p, e.pos.x + 1.2, e.pos.z); g.command({ type: 'interact', id }); run(g, 3); }
+  ok(!p.helpTask && relOf(p, 'merchant').aff > a0, `돕기 완료 → 친밀도 ${a0} → ${relOf(p, 'merchant').aff}`);
+  g.command({ type: 'helpStart', npcId: 'merchant' });
+  ok(!p.helpTask, '돕기는 하루 1회');
+  // 히든 퀘스트: 잠김 → 열림
+  g.hidden.check(p);
+  ok(!p.hidden.belo_withdrawal, '히든 퀘스트: 관계가 낮으면 보이지 않음');
+  const r = relOf(p, 'belo'); r.aff = 65; r.rap = 45;
+  g.hidden.check(p);
+  ok(p.hidden.belo_withdrawal?.status === 'offered', '친밀 「신뢰」+ 교감 40 → 벨로가 따로 말을 건다');
+  g.command({ type: 'hiddenAccept', id: 'belo_withdrawal' });
+  g.life.minutes = Math.floor(g.life.minutes / 1440) * 1440 + 21 * 60;
+  teleport(p, 9, 2); run(g, 1.5);
+  ok(p.hidden.belo_withdrawal.step === 1, '밤 훈련장 방문 → 다음 단계');
+  g.command({ type: 'hiddenChoose', id: 'belo_withdrawal', index: 0, npcId: 'belo' });
+  ok(p.hidden.belo_withdrawal.status === 'done' && p.cosmetics.includes('crest_harck'), '선택 → 보상: 하르크 가문 방패 문양 (외형 전용)');
+  const mr = relOf(p, 'merchant'); mr.aff = 70; mr.rap = 40;
+  g.hidden.check(p);
+  ok(!p.hidden.merchant_smuggle, '상인 히든: 다리가 끊어진 상태면 잠김 (세계 조건)');
+}
+
+console.log('15) 탐험 지도 · 질주 기력');
+{
+  const { ExploreMap } = await import('../src/game/Explore.js');
+  const { FEEL } = await import('../src/data/feel.js');
+  const { g, p } = newGame('archer');
+  ok(g.explore.isExplored(p.pos.x, p.pos.z) && !g.explore.isExplored(80, -80), '시작 지점만 밝혀짐');
+  teleport(p, 60, 60); run(g, 1);
+  ok(g.explore.isExplored(60, 60), '이동한 곳이 밝혀짐');
+  const ex2 = new ExploreMap(g.explore.serialize());
+  ok(ex2.isExplored(60, 60) && !ex2.isExplored(-90, 80), '탐험 기록 저장/불러오기');
+  teleport(p, -80, 20);
+  g.command({ type: 'sprint', on: true }); g.command({ type: 'moveDir', x: 1, z: 0 });
+  const s0 = p.stamina.value; const x0 = p.pos.x;
+  run(g, 1);
+  ok(p.stamina.value < s0 && p.pos.x - x0 > p.stats.moveSpeed * 1.3, `질주: 기력 ${s0} → ${p.stamina.value.toFixed(0)}, 1초에 ${(p.pos.x - x0).toFixed(1)}m`);
+  let wasLocked = false;
+  run(g, 7, () => { if (p.stamina.locked) wasLocked = true; });
+  ok(wasLocked, '기력 0 → 잠김');
+  g.command({ type: 'sprint', on: false }); g.command({ type: 'moveDir', x: 0, z: 0 });
+  p.stamina.value = 0; p.stamina.locked = true; p.stamina.lastUse = g.time;
+  run(g, 0.5);
+  ok(p.stamina.locked, '잠김: 회복 20% 전까지 질주 불가');
+  run(g, 2);
+  ok(!p.stamina.locked && p.stamina.value >= FEEL.move.unlockAt, `기력 회복 (${p.stamina.value.toFixed(0)})`);
+  p.stamina.value = 10;
+  g.command({ type: 'skill', slot: 'dodge' });
+  ok(!(p.fx.iframes > 0), '구르기도 기력을 쓴다 (부족하면 불가)');
 }
 
 console.log(failures ? `\nFAIL (${failures})` : '\nOK');

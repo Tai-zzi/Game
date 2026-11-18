@@ -111,7 +111,7 @@ export function createCart(id, pos) {
 /** 상호작용 지점: 채집 더미 / 조사 단서 / 작업대 */
 export function createInteractable(id, kind, data) {
   const e = baseEntity(id, kind, data.name, data.x, data.z);
-  e.modelId = kind === 'node' ? (data.item === 'lumber' ? 'prop_lumber' : 'prop_wreck') : kind === 'clue' ? 'prop_clue' : 'prop_workbench';
+  e.modelId = kind === 'node' ? (data.item === 'lumber' ? 'prop_lumber' : 'prop_wreck') : kind === 'clue' ? 'prop_clue' : kind === 'task' ? 'prop_task' : kind === 'desk' ? 'prop_desk' : 'prop_workbench';
   e.data = data;
   e.radius = kind === 'station' ? 1.0 : 0.7;
   e.readyAt = 0; // 채집 더미 재생성 시각
