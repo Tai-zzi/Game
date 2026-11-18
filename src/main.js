@@ -20,6 +20,8 @@ import { Minimap } from './ui/Minimap.js';
 import { Dialog } from './ui/Dialog.js';
 import { ShopUI } from './ui/ShopUI.js';
 import { showTitle } from './ui/Title.js';
+import { Particles } from './render/Particles.js';
+import { FxDirector } from './render/FxDirector.js';
 import { WorldMap, BondsWindow } from './ui/WorldMap.js';
 import { NPCS } from './data/npcs.js';
 
@@ -37,6 +39,9 @@ AiAssets.renderer = renderer.renderer;
 const world = new World(renderer.scene);
 world.loadAiProps(AiAssets);
 const vfx = new VFX(renderer.scene);
+const particles = new Particles(renderer.scene);
+particles.setQuality(quality);
+let fx = null, easeT = 0;
 const bus = new EventBus();
 const clock = new THREE.Clock();
 let game = null, views, hud, overlay, minimap, dialog, input, shop, worldMap, bonds;
@@ -47,8 +52,10 @@ function loop() {
   const realDt = Math.min(clock.getDelta(), 0.1);
   // 히트스톱(거의 정지) · 슬로모션: 시뮬레이션과 애니메이션만 느려지고 카메라는 실시간
   let scale = 1;
-  if (hitStopT > 0) { hitStopT -= realDt; scale = 0.04; }
-  else if (slowT > 0) { slowT -= realDt; scale = FEEL.slowMo.scale; }
+  const HS = FEEL.hitStopEase;
+  if (hitStopT > 0) { hitStopT -= realDt; scale = HS.minScale; easeT = HS.easeOut; }
+  else if (easeT > 0) { easeT -= realDt; scale = HS.minScale + (1 - HS.minScale) * (1 - Math.max(0, easeT) / HS.easeOut); } // 부드럽게 풀림
+  if (slowT > 0) { slowT -= realDt; scale = Math.min(scale, FEEL.slowMo.scale); }
   const dt = realDt * scale;
   elapsed += dt;
   world.update(elapsed, dt);
@@ -72,6 +79,8 @@ function loop() {
     renderer.follow(tmp.set(Math.sin(elapsed * 0.07) * 14, 0, Math.cos(elapsed * 0.07) * 14), realDt);
   }
   vfx.update(dt);
+  particles.update(dt, heightAt);
+  fx?.update(dt, realDt);
   renderer.render();
   requestAnimationFrame(loop);
 }
@@ -81,6 +90,7 @@ showTitle().then(({ profile, save }) => startGame(profile, save));
 
 function setQuality(q) {
   renderer.setQuality(q);
+  particles.setQuality(q);
   AiAssets.enabled = q === 'high';
   Save.saveSettings({ ...Save.loadSettings(), quality: q });
   hud?.toast(q === 'high' ? '그래픽: 높음 (후처리·AI 모델)' : '그래픽: 낮음 (후처리 끔·대체 모델 — 다시 시작 시 완전 적용)');
@@ -120,6 +130,7 @@ function startGame(profile, saveData) {
 
   game.init(profile, saveData);
   const pid = game.playerId;
+  fx = new FxDirector({ bus, game, views, renderer, particles, hooks: { hitStop: (s) => { hitStopT = Math.max(hitStopT, s); }, slow: (s) => { slowT = Math.max(slowT, s); } } });
   world.setBridgeState(game.publicState.bridge.state);
   renderer.focus.copy(views.positionOf(pid));
   renderer.zoomTarget = 24;
@@ -244,27 +255,7 @@ function startGame(profile, saveData) {
     alertT = setTimeout(() => alert.classList.add('hidden'), (time || 2.5) * 1000);
   });
   bus.on('counter', ({ id }) => { renderer.flashEdge('#5ab8ff', 0.6); renderer.pulseChroma(0.6); Sfx.play('crit'); hitStopT = Math.max(hitStopT, 0.12); vfx.ring(posOf(id), '#5ab8ff', 3, 0.4); });
-  bus.on('groggy', ({ id }) => { Sfx.play('knockdown'); vfx.ring(posOf(id), '#ffe08a', 4, 0.6); renderer.addShake(0.3); });
   bus.on('parry', () => { Sfx.play('block'); Sfx.play('crit'); renderer.flashEdge('#ffffff', 0.5); hitStopT = Math.max(hitStopT, 0.1); });
-
-  // ───── 타격감: 히트스톱 · 흔들림 · 펀치 · 섬광 · 색수차 · 슬로모션 · 소리 층 ─────
-  bus.on('damage', ({ sourceId, targetId, crit, weight, hitStop, killing, knockdown, blocked }) => {
-    const W = FEEL.weight[weight] || FEEL.weight.light;
-    if (targetId === pid) {
-      renderer.addShake(FEEL.playerHit.shake);
-      if (!blocked) renderer.flashEdge(FEEL.playerHit.flashColor, FEEL.playerHit.flash);
-      Sfx.play(blocked ? 'block' : 'hurt');
-      return;
-    }
-    if (sourceId !== pid) return;
-    hitStopT = Math.max(hitStopT, hitStop || 0);
-    renderer.addShake(W.shake * (crit ? 1.3 : 1));
-    if (W.punch) renderer.addPunch(W.punch);
-    if (crit) { renderer.flashEdge(FEEL.crit.flashColor, FEEL.crit.flash); Sfx.play('crit'); }
-    if (weight === 'heavy') { renderer.pulseChroma(FEEL.chroma.heavy); Sfx.play('heavyImpact'); } else Sfx.play('impact', weight === 'medium' ? 0.8 : 1);
-    if (knockdown) Sfx.play('knockdown');
-    if (killing) slowT = Math.max(slowT, FEEL.slowMo.killDuration);
-  });
 
   bus.on('levelUp', () => { vfx.levelUp(() => posOf(pid)); Sfx.play('levelUp'); persist(); });
   bus.on('loot', ({ itemId, at }) => { if (at) vfx.loot(new THREE.Vector3(at.x, posOf(pid).y + 0.5, at.z), () => posOf(pid, 1), AiAssets, itemId); Sfx.play('coin'); });

@@ -21,18 +21,22 @@ export class EntityViews {
     bus.on('classChanged', ({ id }) => { this.destroy(id); this.create(id); const v = this.views.get(id); if (v) v.born = 1; });
     bus.on('skillCast', ({ id, skillId, windup, recovery, stage }) => this.views.get(id)?.model.playSkill(skillId, { windup, recovery, combo: stage || 0 }));
     bus.on('telegraph', ({ id, time }) => this.views.get(id)?.model.playSkill('mob_attack', { windup: time, recovery: 0.3 }));
-    bus.on('damage', ({ targetId, weight, knockdown, crit }) => {
+    // 피격 반응 (입자·카메라·소리는 FxDirector)
+    bus.on('damage', ({ sourceId, targetId, weight, knockdown, amount, dir }) => {
       const v = this.views.get(targetId);
       if (!v) return;
-      v.model.hitReact(weight, knockdown);
-      const p = this.positionOf(targetId, 0.8 * v.scale);
-      vfx.impact(p, v.entity.kind === 'player' ? '#ff8a6a' : crit ? '#fff2b0' : '#ffd27a', FEEL.weight[weight].sparks * (crit ? 1.5 : 1));
+      const src = this.game.get(sourceId);
+      v.model.hitReact(weight, knockdown, src?.kind === 'player' ? FEEL.classFx[src.classId]?.rim : '#ff5a3a');
+      v.lastDir = dir; v.lastAmount = amount;
     });
     bus.on('death', ({ id }) => {
       const v = this.views.get(id);
       if (!v) return;
       v.dying = 0;
       v.model.die();
+      // 넘치는 피해로 쓰러지면 날아간다 (래그돌 흉내)
+      const e = v.entity;
+      if (e.kind === 'monster' && v.lastAmount > e.stats.maxHp * 0.45 && v.lastDir) { v.fling = { vx: v.lastDir.x * 7, vy: 5, vz: v.lastDir.z * 7, spin: (Math.random() - 0.5) * 14 }; v.flingX = v.model.root.position.x; v.flingZ = v.model.root.position.z; v.flingY = 0; }
       vfx.unravel(this.positionOf(id, 0), v.entity.monsterId === 'unravel_sheep' ? '#ffd98a' : '#b8c8ff', v.model.height * v.scale);
     });
     bus.on('playerRespawn', ({ id }) => { const v = this.views.get(id); if (v) { v.dying = -1; v.model.root.scale.setScalar(1); v.model.revive(); } });
@@ -77,6 +81,18 @@ export class EntityViews {
     this.views.delete(id);
   }
 
+  updateDying(v, dt, root, gy) {
+    v.dying += dt;
+    if (v.fling) {
+      const f = v.fling;
+      f.vy -= 18 * dt; v.flingY = Math.max(0, (v.flingY || 0) + f.vy * dt);
+      root.position.x = (v.flingX += f.vx * dt); root.position.z = (v.flingZ += f.vz * dt);
+      root.position.y = gy + v.flingY; root.rotation.x += f.spin * dt;
+      if (v.flingY <= 0 && f.vy < 0) { f.vx *= 0.5; f.vz *= 0.5; f.vy = Math.abs(f.vy) * 0.3; f.spin *= 0.5; if (Math.abs(f.vy) < 1) v.fling = null; this.onLand?.(v); }
+    }
+    if (v.dying > 0.9) { const k = Math.min(1, (v.dying - 0.9) / 1.2); v.model.dissolve(k); if (!v.unraveled) { v.unraveled = true; this.onUnravel?.(v); } }
+  }
+
   pickables() { const r = []; for (const v of this.views.values()) if (v.dying < 0 && v.model.root.visible) r.push(v.pick); return r; }
 
   positionOf(id, yOffset = 0, out = new THREE.Vector3()) {
@@ -91,6 +107,7 @@ export class EntityViews {
     for (const v of this.views.values()) {
       const e = v.entity, root = v.model.root;
       // 큰 순간이동(끌어당김·밀침)은 부드럽게, 평상시는 즉시 동기화
+      if (v.fling || v.flingX != null) { v.model.update(dt, t); if (v.dying >= 0) this.updateDying(v, dt, root, Math.max(heightAt(root.position.x, root.position.z), -0.9)); continue; }
       const jx = e.pos.x - root.position.x, jz = e.pos.z - root.position.z;
       if (jx * jx + jz * jz > 0.8 && jx * jx + jz * jz < 400) { const k = Math.min(1, dt * 14); root.position.x += jx * k; root.position.z += jz * k; }
       else { root.position.x = e.pos.x; root.position.z = e.pos.z; }
@@ -99,6 +116,8 @@ export class EntityViews {
       // 띄움: 포물선
       const airT = e.fx?.air > 0 ? e.fx.air / FEEL.knock.airTime : 0;
       v.airY = airT > 0 ? Math.sin(airT * Math.PI) * FEEL.knock.airHeight : Math.max(0, v.airY - dt * 8);
+      if (v.airY > 0.3) v.wasAir = true;
+      else if (v.wasAir && v.airY < 0.05) { v.wasAir = false; this.onLand?.(v); } // 띄움·넘어짐 착지 먼지
       root.position.y = gy + v.airY;
       // NPC: 대화 중에는 플레이어를 바라본다
       let rot = e.rot;
@@ -113,9 +132,19 @@ export class EntityViews {
       if (v.born < 1 && v.dying < 0) { v.born = Math.min(1, v.born + dt * 2.5); root.scale.setScalar(easeOutBack(v.born) * v.scale); }
       if (v.dying >= 0) {
         v.dying += dt;
-        if (v.dying > 0.9) { // 쓰러진 뒤 실로 풀려 사라짐
+        if (v.fling) { // 날아감: 포물선 + 회전
+          const f = v.fling;
+          f.vy -= 18 * dt; v.flingY = Math.max(0, (v.flingY || 0) + f.vy * dt);
+          root.position.x = (v.flingX = (v.flingX ?? root.position.x) + f.vx * dt);
+          root.position.z = (v.flingZ = (v.flingZ ?? root.position.z) + f.vz * dt);
+          root.position.y = gy + v.flingY; root.rotation.x += f.spin * dt;
+          if (v.flingY <= 0 && f.vy < 0) { f.vx *= 0.5; f.vz *= 0.5; f.vy = Math.abs(f.vy) * 0.3; f.spin *= 0.5; if (Math.abs(f.vy) < 1) v.fling = null; this.onLand?.(v); }
+        }
+        if (v.dying > 0.9) { // 쓰러진 뒤 실로 풀려 사라짐 (디졸브 + 살짝 줄어듦)
           const k = Math.min(1, (v.dying - 0.9) / 1.2);
-          root.scale.set(v.scale * (1 - k * 0.6), v.scale * Math.max(0.01, 1 - k), v.scale * (1 - k * 0.6));
+          v.model.dissolve(k);
+          root.scale.setScalar(v.scale * (1 - k * 0.25));
+          if (!v.unraveled) { v.unraveled = true; this.onUnravel?.(v); }
         }
       }
       v.model.update(dt, t);

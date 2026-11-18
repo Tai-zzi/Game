@@ -115,12 +115,13 @@ export class CharacterModel {
 
   collectMaterials() {
     this.mats = [];
+    this.rimMats = [];
     this.body.traverse((o) => {
       if (!o.isMesh) return;
       o.castShadow = true;
       const ms = Array.isArray(o.material) ? o.material : [o.material];
       for (const m of ms) {
-        if (m.isMeshStandardMaterial) addRim(m, '#ffe2b0', this.spec.prop ? 0.12 : 0.3);
+        if (m.isMeshStandardMaterial) { addRim(m, '#ffe2b0', this.spec.prop ? 0.12 : 0.3); this.rimMats.push(m); }
         if (m.emissive && !m.userData.glow) { m.userData.baseEmissive = m.emissive.clone(); this.mats.push(m); }
       }
     });
@@ -216,8 +217,11 @@ export class CharacterModel {
     }
   }
 
-  hitReact(weight = 'light', knockdown = false) {
+  /** 피격: 흰 섬광 → 직업색 테두리, 찌그러짐, 흔들림 */
+  hitReact(weight = 'light', knockdown = false, rimColor = null) {
     this.flashT = 1;
+    this.rimT = 1; if (rimColor) (this.rimColor ||= new THREE.Color()).set(rimColor);
+    this.wobble = weight === 'heavy' ? 1 : weight === 'medium' ? 0.6 : 0.3;
     this.squash = weight === 'heavy' ? 1 : weight === 'medium' ? 0.7 : 0.45;
     this.hit = 1;
     if (knockdown) this.downT = 1.0;
@@ -246,7 +250,11 @@ export class CharacterModel {
     }
   }
 
+  /** 사망 디졸브 (0~1): 화면 점묘로 사라짐 */
+  dissolve(k) { for (const m of this.rimMats) if (m.userData.dissolve) m.userData.dissolve.value = k; }
+
   revive() {
+    this.dissolve(0);
     this.dead = false; this.downT = 0;
     this.body.rotation.set(0, 0, 0); this.body.position.set(0, 0, 0);
     this.current = null;
@@ -284,6 +292,13 @@ export class CharacterModel {
       for (const m of this.mats) m.emissive.copy(m.userData.baseEmissive).lerp(FLASH, this.flashT * 0.9);
     }
     if (this.parts.glow) this.parts.glow.rotation.y += dt * 1.5;
+    if (this.rimT > 0) {
+      this.rimT = Math.max(0, this.rimT - dt * 3.5);
+      const k = this.flashT > 0.3 ? 0 : this.rimT; // 흰 섬광이 먼저, 뒤이어 직업색 테두리
+      for (const m of this.rimMats) m.userData.hitRim?.value.copy(this.rimColor || FLASH).multiplyScalar(k);
+    }
+    if (this.wobble > 0) { this.wobble = Math.max(0, this.wobble - dt * 4); this.root.rotation.z = Math.sin(this.clock * 45) * 0.1 * this.wobble; }
+    else if (this.root.rotation.z) this.root.rotation.z = 0;
   }
 
   animateStatic(dt, t) {

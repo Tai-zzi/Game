@@ -404,5 +404,26 @@ console.log('15) 탐험 지도 · 질주 기력');
   ok(!(p.fx.iframes > 0), '구르기도 기력을 쓴다 (부족하면 불가)');
 }
 
+console.log('16) 타격감 설정 (feel.js) 검증');
+{
+  const { FEEL } = await import('../src/data/feel.js');
+  const { MONSTERS } = await import('../src/data/monsters.js');
+  const { CLASS_ORDER } = await import('../src/data/classes.js');
+  ok(['light', 'medium', 'heavy'].every((w) => ['push', 'stagger', 'hitStop', 'shake', 'sparks'].every((k) => FEEL.weight[w][k] != null) && FEEL.fx.threadsPerHit[w] && FEEL.rumble[w]), '무게별 히트스톱·흔들림·불꽃·실 조각·진동 값');
+  ok(FEEL.weight.light.hitStop < FEEL.weight.medium.hitStop && FEEL.weight.medium.hitStop < FEEL.weight.heavy.hitStop, '히트스톱은 무게에 비례');
+  ok(Object.keys(MONSTERS).every((id) => FEEL.materials[id]), '모든 몬스터에 피격 재질 입자');
+  ok(CLASS_ORDER.every((c) => FEEL.classFx[c]?.trail && FEEL.classFx[c]?.rim), '직업별 궤적·테두리 색');
+  ok(['maxStreaks', 'maxThreads', 'maxPuffs', 'maxFlashes', 'maxRings', 'maxDecals', 'maxGhosts'].every((k) => FEEL.fx[k] > 0) && FEEL.fx.lowQualityScale < 1, '입자 풀 크기 고정 + 저품질 배율');
+  const { g, p } = newGame('guardian');
+  g.command({ type: 'debugDummy' });
+  const dummy = g.livingMonsters().find((m) => m.dummy);
+  ok(!!dummy && dummy.stats.atk === 0, 'F9 시험 허수아비 생성 (공격하지 않음)');
+  const evs = [];
+  g.bus.on('damage', (d) => evs.push(d));
+  teleport(dummy, p.pos.x + 2, p.pos.z); p.targetId = dummy.id; p.rot = Math.atan2(2, 0);
+  for (let i = 0; i < 3; i++) { g.command({ type: 'skill', slot: 'basic', aim: { ...dummy.pos } }); run(g, 0.45); }
+  ok(evs.length >= 3 && evs.every((d) => d.dir && d.hitStop > 0) && evs[2].weight === 'medium', '3연타: 방향·히트스톱 정보, 셋째 타는 더 무겁다');
+}
+
 console.log(failures ? `\nFAIL (${failures})` : '\nOK');
 process.exit(failures ? 1 : 0);

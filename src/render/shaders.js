@@ -109,15 +109,19 @@ export function makeWaterMaterial() {
 export function addRim(mat, color = '#ffe2b0', strength = 0.35) {
   if (mat.userData.rim) return;
   mat.userData.rim = true;
+  mat.userData.dissolve ||= { value: 0 };
+  mat.userData.hitRim ||= { value: new THREE.Color(0, 0, 0) };
   const prev = mat.onBeforeCompile;
   mat.onBeforeCompile = (sh, r) => {
     prev?.(sh, r);
     sh.uniforms.uRimColor = { value: new THREE.Color(color) };
     sh.uniforms.uRimStrength = { value: strength };
-    sh.fragmentShader = 'uniform vec3 uRimColor;\nuniform float uRimStrength;\n' + sh.fragmentShader.replace('#include <emissivemap_fragment>',
+    sh.uniforms.uDissolve = mat.userData.dissolve || (mat.userData.dissolve = { value: 0 });
+    sh.uniforms.uHitRim = mat.userData.hitRim || (mat.userData.hitRim = { value: new THREE.Color(0, 0, 0) });
+    sh.fragmentShader = 'uniform vec3 uRimColor;\nuniform float uRimStrength;\nuniform float uDissolve;\nuniform vec3 uHitRim;\n' + sh.fragmentShader.replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\n if (uDissolve > 0.0) { float n = fract(sin(dot(floor(gl_FragCoord.xy / 3.0), vec2(12.9898, 78.233))) * 43758.5453); if (n < uDissolve) discard; }').replace('#include <emissivemap_fragment>',
       `#include <emissivemap_fragment>
       float rimF = pow(1.0 - max(0.0, dot(normalize(vNormal), normalize(vViewPosition))), 2.5);
-      totalEmissiveRadiance += uRimColor * rimF * uRimStrength;`);
+      totalEmissiveRadiance += uRimColor * rimF * uRimStrength + uHitRim * rimF * 3.0;`);
   };
   mat.customProgramCacheKey = () => 'rim';
 }

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { npcMarker } from '../game/Dialogs.js';
 import { ITEMS } from '../data/items.js';
 import { FEEL } from '../data/feel.js';
+import { SKILLS } from '../data/skills.js';
 
 /**
  * 3D 위치에 붙는 DOM 요소: 데미지 숫자, 이름표/체력바, NPC 퀘스트 표식.
@@ -11,16 +12,33 @@ export class Overlay {
     Object.assign(this, { game, views, camera });
     this.el = document.getElementById('overlay');
     this.floats = [];
+    this.pool = [];
+    this.stacks = new Map();
     this.plates = new Map();
     this.v = new THREE.Vector3();
 
-    bus.on('damage', ({ targetId, amount, crit, weight }) => {
-      const t = game.get(targetId);
-      const cls = t?.kind === 'player' ? 'taken' : crit ? 'crit' : weight === 'heavy' ? 'heavy' : '';
-      this.float(targetId, (t?.kind === 'player' ? '-' : '') + amount, cls, 1.6 * (t?.scale || 1), { pop: crit ? 1.9 : weight === 'heavy' ? 1.5 : 1.25 });
+    bus.on('damage', ({ sourceId, targetId, amount, crit, weight, skillId }) => {
+      const t = game.get(targetId), src = game.get(sourceId);
+      if (t?.kind === 'player') { this.float(targetId, `-${amount}`, 'taken', 1.6, { pop: 1.25 }); return; }
+      // 피해 종류 색: 원소 → 직업
+      const sk = SKILLS[skillId];
+      const color = sk?.element ? FEEL.elementColors[sk.element] : src?.kind === 'player' ? FEEL.classFx[src.classId]?.dmg : null;
+      // 연달아 맞으면 한 숫자로 합산 (누적 표시)
+      const key = `${targetId}|${skillId}`;
+      const st = this.stacks.get(key);
+      if (st && !st.f.dead && st.f.t < FEEL.stack.window && !crit) {
+        st.total += amount; st.hits++;
+        st.f.d.textContent = `${st.total}`;
+        st.f.d.dataset.hits = `×${st.hits}`;
+        st.f.t = 0; st.f.pop = 1.35;
+        return;
+      }
+      const cls = crit ? 'crit' : weight === 'heavy' ? 'heavy' : '';
+      const f = this.float(targetId, `${amount}`, cls, 1.6 * (t?.scale || 1), { pop: crit ? 2.0 : weight === 'heavy' ? 1.5 : 1.25, color: crit ? null : color });
+      this.stacks.set(key, { f, total: amount, hits: 1 });
     });
     const CALL = { back: '백 어택', head: '헤드 어택' };
-    bus.on('positional', ({ targetId, kind }) => this.float(targetId, CALL[kind], 'callout', 2.4, { pop: 1.3, still: true }));
+    bus.on('positional', ({ targetId, kind }) => this.float(targetId, CALL[kind], `callout ${kind}`, 2.4, { pop: 1.3, still: true }));
     bus.on('counter', ({ id }) => this.float(id, '카운터!', 'callout counter', 2.8, { pop: 2, still: true }));
     bus.on('groggy', ({ id }) => this.float(id, '무력화!', 'callout groggy', 3.0, { pop: 2, still: true }));
     bus.on('parry', ({ id }) => this.float(id, '받아치기!', 'callout counter', 2.4, { pop: 1.8, still: true }));
@@ -42,16 +60,24 @@ export class Overlay {
   }
 
   /** 떠오르는 글자: 튀어나오며(pop) 포물선으로 떨어진다. still = 제자리에서 위로만 */
-  float(entityId, text, cls = '', yOff = 1.6, { pop = 1.25, still = false } = {}) {
+  float(entityId, text, cls = '', yOff = 1.6, { pop = 1.25, still = false, color = null } = {}) {
     const pos = this.views.positionOf(entityId, yOff);
-    const d = document.createElement('div');
+    // DOM 요소 재사용 (풀)
+    const d = this.pool.pop() || document.createElement('div');
     d.className = `dmg ${cls}`;
     d.textContent = text;
-    this.el.appendChild(d);
+    d.style.color = color || '';
+    delete d.dataset.hits;
+    d.style.display = '';
+    if (!d.parentNode) this.el.appendChild(d);
     const N = FEEL.numbers;
-    this.floats.push({ d, pos, t: 0, life: still ? N.life * 1.2 : N.life, dx: still ? 0 : (Math.random() < 0.5 ? -1 : 1) * (20 + Math.random() * N.arc), pop, still });
-    if (this.floats.length > 60) { const f = this.floats.shift(); f.d.remove(); }
+    const f = { d, pos, t: 0, life: still ? N.life * 1.2 : N.life, dx: still ? 0 : (Math.random() < 0.5 ? -1 : 1) * (20 + Math.random() * N.arc), pop, still };
+    this.floats.push(f);
+    if (this.floats.length > 60) this.recycle(this.floats.shift());
+    return f;
   }
+
+  recycle(f) { f.dead = true; f.d.style.display = 'none'; this.pool.push(f.d); }
 
   bubble(entityId, text) {
     const old = this.bubbles?.get(entityId);
@@ -109,7 +135,7 @@ export class Overlay {
       const sc = 1 + (f.pop - 1) * Math.max(0, 1 - f.t * 9);
       f.d.style.transform = `translate(calc(-50% + ${s.x + f.dx * k}px), calc(-50% + ${s.y + y}px)) scale(${sc})`;
       f.d.style.opacity = String(1 - Math.max(0, k - 0.65) / 0.35);
-      if (f.t >= f.life) { f.d.remove(); this.floats.splice(i, 1); }
+      if (f.t >= f.life) { this.recycle(f); this.floats.splice(i, 1); }
     }
     this.updateBubbles(dt);
     const player = this.game.player();

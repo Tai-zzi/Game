@@ -21,23 +21,36 @@ const GradeShader = {
     uContrast: { value: 1.05 },
     uFlash: { value: 0 },
     uChroma: { value: 0 },
+    uBlur: { value: 0 },
+    uRipple: { value: new THREE.Vector4(0.5, 0.5, 9, 0) },
+    uImpact: { value: 0 },
+    uDesat: { value: 0 },
+    uRed: { value: 0 },
     uFlashColor: { value: new THREE.Color('#ffd24a') },
   },
   vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
-  fragmentShader: `uniform sampler2D tDiffuse; uniform float uVignette, uSaturation, uWarmth, uContrast, uFlash, uChroma; uniform vec3 uFlashColor; varying vec2 vUv;
+  fragmentShader: `uniform sampler2D tDiffuse; uniform float uVignette, uSaturation, uWarmth, uContrast, uFlash, uChroma, uBlur, uImpact, uDesat, uRed; uniform vec4 uRipple; uniform vec3 uFlashColor; varying vec2 vUv;
     void main(){
-      vec2 dir = vUv - 0.5;
+      vec2 uv = vUv;
+      // 충격파 굴절 물결 (화면 공간)
+      if (uRipple.w > 0.001) { vec2 rd = uv - uRipple.xy; float rl = length(rd); float wave = sin(rl * 60.0 - uRipple.z * 30.0) * exp(-abs(rl - uRipple.z * 0.6) * 18.0); uv += normalize(rd + 1e-5) * wave * 0.012 * uRipple.w; }
+      vec2 dir = uv - 0.5;
       float ca = uChroma * 0.018 * length(dir);
-      vec4 c = texture2D(tDiffuse, vUv);
+      vec4 c = texture2D(tDiffuse, uv);
+      // 방사 흐림 (치명타·강타)
+      if (uBlur > 0.001) { vec3 acc = c.rgb; for (int i = 1; i < 6; i++) acc += texture2D(tDiffuse, uv - dir * uBlur * 0.03 * float(i)).rgb; c.rgb = acc / 6.0; }
       if (uChroma > 0.001) { c.r = texture2D(tDiffuse, vUv + dir * ca).r; c.b = texture2D(tDiffuse, vUv - dir * ca).b; }
       float l = dot(c.rgb, vec3(0.299, 0.587, 0.114));
-      c.rgb = mix(vec3(l), c.rgb, uSaturation);
+      c.rgb = mix(vec3(l), c.rgb, uSaturation * (1.0 - uDesat));
       c.rgb = (c.rgb - 0.5) * uContrast + 0.5;
       c.rgb += vec3(uWarmth, uWarmth * 0.4, -uWarmth);
       float d = distance(vUv, vec2(0.5));
       c.rgb *= 1.0 - uVignette * smoothstep(0.35, 0.85, d);
       float edge = smoothstep(0.3, 0.75, d);
       c.rgb = mix(c.rgb, uFlashColor, uFlash * edge * 0.75);
+      c.rgb = mix(c.rgb, vec3(0.85, 0.05, 0.05), uRed * smoothstep(0.25, 0.8, d) * 0.6);
+      // 충격 프레임: 고대비 흑백 (각성기 1~2프레임)
+      if (uImpact > 0.5) { float lum = dot(c.rgb, vec3(0.3, 0.6, 0.1)); c.rgb = vec3(step(0.45, lum)); }
       gl_FragColor = vec4(clamp(c.rgb, 0.0, 1.0), c.a);
     }`,
 };
@@ -176,6 +189,18 @@ export class Renderer {
     this.night = night;
   }
 
+  /** 가벼운 타격: 맞은 방향으로 카메라 살짝 밀림 */
+  kick(dir, a) { this.kickV = this.kickV || new THREE.Vector3(); this.kickV.x += dir.x * a; this.kickV.z += dir.z * a; }
+  /** 화면 공간 충격파 물결 (월드 좌표 기준) */
+  ripple(worldPos, strength = 1) {
+    const v = worldPos.clone().project(this.camera);
+    this.grade.uniforms.uRipple.value.set(v.x * 0.5 + 0.5, v.y * 0.5 + 0.5, 0, strength);
+  }
+  blurPulse(a) { this.blur = Math.max(this.blur || 0, a); }
+  impactFrame(frames = 2) { this.impactN = frames; }
+  setDesaturate(v) { this.desat = v; }
+  setLowHp(a) { this.lowHp = a; }
+
   /** 질주 시 시야 살짝 넓힘 */
   setFovKick(k) { this.fovKick = k; }
 
@@ -201,7 +226,14 @@ export class Renderer {
       this.camera.position.z += s * Math.sin(t * 1.3 + 2) * 0.4;
       this.trauma = Math.max(0, this.trauma - dt * 1.6);
     }
+    if (this.kickV) { this.camera.position.add(this.kickV); this.kickV.multiplyScalar(Math.exp(-dt * 14)); }
     this.camera.lookAt(this.focus.x, this.focus.y + 0.8, this.focus.z);
+    const U = this.grade.uniforms;
+    U.uRipple.value.z += dt; if (U.uRipple.value.z > 0.8) U.uRipple.value.w = 0;
+    this.blur = Math.max(0, (this.blur || 0) - dt * 5); U.uBlur.value = this.quality === 'high' ? this.blur : 0;
+    U.uImpact.value = this.impactN > 0 ? 1 : 0; if (this.impactN > 0) this.impactN--;
+    U.uDesat.value += ((this.desat || 0) - U.uDesat.value) * Math.min(1, dt * 8);
+    U.uRed.value = this.lowHp ? (0.35 + 0.35 * Math.sin(this.t * 6.5)) * this.lowHp : 0;
     const fov = 38 + (this.fovKick || 0);
     if (Math.abs(this.camera.fov - fov) > 0.01) { this.camera.fov += (fov - this.camera.fov) * Math.min(1, dt * 6); this.camera.updateProjectionMatrix(); }
     this.sun.position.copy(this.focus).add(this.sunOffset);

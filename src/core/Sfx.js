@@ -27,7 +27,9 @@ if (typeof window !== 'undefined') {
 
 const env = (g, t, a, peak, d) => { g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(peak, t + a); g.gain.exponentialRampToValueAtTime(0.0001, t + a + d); };
 
+let pitch = 1;
 function tone(type, f0, f1, dur, peak = 0.3, delay = 0) {
+  f0 *= pitch; f1 *= pitch;
   const t = ctx.currentTime + delay;
   const o = ctx.createOscillator(), g = ctx.createGain();
   o.type = type; o.frequency.setValueAtTime(f0, t); if (f1 !== f0) o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + dur);
@@ -62,13 +64,47 @@ const SOUNDS = {
   levelUp: () => { [523, 659, 784, 1047].forEach((f, i) => tone('triangle', f, f, 0.35, 0.14, i * 0.09)); },
   telegraph: () => tone('sine', 300, 260, 0.12, 0.05),
   knockdown: () => { tone('sine', 80, 40, 0.35, 0.4); noise('lowpass', 600, 80, 0.3, 0.3); },
+  crunch: () => { noise('bandpass', 2600, 900, 0.07, 0.22, 2.5); tone('square', 220, 90, 0.05, 0.06); },
+  tail: () => { noise('lowpass', 900, 200, 0.35, 0.08, 0.7); },
+  ting: () => { tone('sine', 2400, 2350, 0.45, 0.14); tone('sine', 3600, 3550, 0.3, 0.06, 0.01); },
+  boom: () => { tone('sine', 60, 28, 0.7, 0.75); noise('lowpass', 900, 60, 0.6, 0.5); tone('triangle', 180, 60, 0.4, 0.15); },
+  threadSnap: () => { tone('triangle', 1800, 600, 0.06, 0.12); noise('highpass', 5000, 3000, 0.05, 0.1); },
+  heartbeat: () => { tone('sine', 62, 48, 0.12, 0.45); tone('sine', 58, 44, 0.12, 0.35, 0.18); },
+  release: () => { tone('sawtooth', 300, 1200, 0.15, 0.12); noise('bandpass', 1500, 4000, 0.12, 0.15, 2); },
 };
 
 export const Sfx = {
-  play(name, arg) {
+  play(name, arg, { jitter = 0 } = {}) {
     if (muted || !ensure() || ctx.state !== 'running') return;
+    pitch = 1 + (Math.random() - 0.5) * 2 * jitter;
     try { SOUNDS[name]?.(arg); } catch { /* 무시 */ }
+    pitch = 1;
   },
+  /** 타격 소리 층: 휘두름 → 몸통 충돌 → 바스러짐/여운. 무거울수록 저음 */
+  hit(weight, crit) {
+    this.play(weight === 'heavy' ? 'heavyImpact' : 'impact', weight === 'medium' ? 0.8 : 1, { jitter: 0.08 });
+    this.play('crunch', null, { jitter: 0.15 });
+    if (weight !== 'light') this.play('tail', null, { jitter: 0.1 });
+    if (crit) this.play('ting', null, { jitter: 0.03 });
+  },
+  /** 차지: 올라가는 음 */
+  chargeStart(max) {
+    if (muted || !ensure() || ctx.state !== 'running') return;
+    this.chargeStop();
+    const t = ctx.currentTime, o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = 'triangle'; o.frequency.setValueAtTime(220, t); o.frequency.exponentialRampToValueAtTime(880, t + max);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.08, t + 0.1);
+    o.connect(g).connect(master); o.start(t);
+    this.charge = { o, g };
+  },
+  chargeStop() { if (!this.charge) return; const { o, g } = this.charge; try { g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.05); o.stop(ctx.currentTime + 0.06); } catch { /* 무시 */ } this.charge = null; },
   setVolume(v) { volume = v; if (master) master.gain.value = v; },
   toggleMute() { muted = !muted; return muted; },
 };
+
+/** 패드 진동 (연결된 경우만) */
+export function rumble([ms, weak, strong]) {
+  try {
+    for (const pad of navigator.getGamepads?.() || []) pad?.vibrationActuator?.playEffect?.('dual-rumble', { duration: ms, weakMagnitude: weak, strongMagnitude: strong });
+  } catch { /* 무시 */ }
+}

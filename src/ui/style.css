@@ -296,3 +296,18 @@ button.primary:hover { background: #95603a; }
 .wm-hint { position: absolute; left: 14px; bottom: 10px; font-size: 12px; color: #3b2a1c; background: rgba(250,239,214,0.85); padding: 3px 8px; border-radius: 6px; }
 #waypoint-arrow { position: fixed; left: 50%; top: 50%; font-size: 28px; color: #ffd24a; text-shadow: 0 0 8px #ff9a2a, 0 2px 3px #000; pointer-events: none; z-index: 4; }
 #waypoint-arrow span { position: absolute; left: 50%; top: 100%; transform: translateX(-50%); font-size: 11px; color: #fff3d6; white-space: nowrap; }
+
+/* ───── 타격감: 연타 · 레터박스 · 숫자 ───── */
+#combo { position: absolute; right: 290px; top: 42%; font-family: var(--serif); color: #fff3d6; text-shadow: 0 0 10px #ff9a2a, 0 2px 3px #000; pointer-events: none; text-align: right; }
+#combo b { font-size: 44px; color: #ffe08a; } #combo i { display: block; font-style: normal; font-size: 20px; color: #ffb84a; }
+#combo.pop { animation: comboPop 0.18s ease-out; }
+@keyframes comboPop { 0% { transform: scale(1.35); } 100% { transform: scale(1); } }
+#letterbox i { position: fixed; left: 0; right: 0; height: 0; background: #000; z-index: 15; transition: height 0.25s ease; pointer-events: none; }
+#letterbox i:first-child { top: 0; } #letterbox i:last-child { bottom: 0; }
+#letterbox.on i { height: 11vh; }
+.dmg.crit { animation: critShake 0.08s 5; }
+@keyframes critShake { 50% { margin-left: 3px; } }
+.dmg.callout { background: linear-gradient(100deg, transparent 30%, rgba(255,255,255,0.7) 50%, transparent 70%) no-repeat; background-size: 200% 100%; -webkit-background-clip: text; animation: shine 0.8s ease-out; }
+.dmg.callout.head { color: #ffb84a; } .dmg.callout.back { color: #c890ff; }
+@keyframes shine { 0% { background-position: 150% 0; } 100% { background-position: -50% 0; } }
+.dmg[data-hits]::after { content: attr(data-hits); font-size: 0.5em; margin-left: 3px; opacity: 0.8; }
