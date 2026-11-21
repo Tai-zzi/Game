@@ -16,8 +16,8 @@ const G = '#9fd0ff', A = '#ffd24a', EF = '#ff8a4a', EC = '#8fc8ff', D = '#6ad08a
 
 export const SKILLS = {
   // ───────────── 공통 ─────────────
-  dodge: { id: 'dodge', name: '구르기', desc: '짧게 굴러 공격을 피한다. 잠깐 무적. 다른 동작을 취소할 수 있다.', type: 'dodge', cast: 'instant',
-    distance: 4.5, duration: 0.28, iframes: 0.32, cooldown: 4, windup: 0, recovery: 0.05, icon: '구' },
+  dodge: { id: 'dodge', name: '구르기', desc: '짧게 굴러 공격을 피한다. 잠깐 무적. 다른 동작을 취소할 수 있다. 2회 충전, 3.5초마다 1회 회복.', type: 'dodge', cast: 'instant',
+    distance: 4.5, duration: 0.28, iframes: 0.32, cooldown: 0.45, windup: 0, recovery: 0.05, icon: '구' },
 
   // ───────────── 수호기사 (결의) — "어디를 막고 누구를 지킬까" ─────────────
   g_basic: { id: 'g_basic', name: '창 연타', desc: '짧은 창 3연타. 막은 직후의 찌르기는 결의 20을 써서 반격(2배).', type: 'melee', cast: 'combo', icon: '창',

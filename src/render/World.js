@@ -119,6 +119,7 @@ export class World {
     const stone = new THREE.MeshStandardMaterial({ color: '#9b9285', roughness: 0.95 });
     const houses = HARVEN.houses;
     for (const h of houses) {
+      if (h.shop) { this.buildShop(h); continue; }
       const g = new THREE.Group();
       const y = heightAt(h.x, h.z);
       g.position.set(h.x, y, h.z);
@@ -156,6 +157,31 @@ export class World {
       this.group.add(g);
       (this.houseGroups ||= []).push({ g, h });
     }
+  }
+
+  // ---------------- 잡화점 (앞이 트인 가게: 뒤 창고 + 차양 + 계산대 + 선반 + 간판) ----------------
+  buildShop(h) {
+    const g = new THREE.Group();
+    const y = heightAt(h.x, h.z + 2);
+    g.position.set(h.x, y, h.z);
+    const stone = new THREE.MeshStandardMaterial({ color: '#9b9285', roughness: 0.95 });
+    const wood = new THREE.MeshStandardMaterial({ color: '#6b4428', roughness: 0.85 });
+    const cloth = new THREE.MeshStandardMaterial({ color: '#8a3a2a', roughness: 0.9, side: THREE.DoubleSide });
+    const back = new THREE.Mesh(new THREE.BoxGeometry(h.w, h.h + 2, h.d), stone); back.position.y = h.h / 2 - 1; g.add(back);
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(h.w + 0.6, 0.25, h.d + 0.6), new THREE.MeshStandardMaterial({ color: h.roof })); roof.position.y = h.h + 0.1; g.add(roof);
+    const D = 3.2; // 차양 깊이
+    for (const sx of [-1, 1]) { const post = new THREE.Mesh(new THREE.BoxGeometry(0.22, h.h - 0.4, 0.22), wood); post.position.set(sx * (h.w / 2 - 0.2), (h.h - 0.4) / 2, h.d / 2 + D); g.add(post); }
+    const awn = new THREE.Mesh(new THREE.PlaneGeometry(h.w + 0.4, D + 0.6), cloth); awn.rotation.x = -Math.PI / 2 + 0.25; awn.position.set(0, h.h - 0.35, h.d / 2 + D / 2); g.add(awn);
+    for (let i = 0; i < 7; i++) { const st = new THREE.Mesh(new THREE.PlaneGeometry((h.w + 0.4) / 14, D + 0.62), new THREE.MeshStandardMaterial({ color: '#e8dcc0', side: THREE.DoubleSide })); st.rotation.copy(awn.rotation); st.position.set(-h.w / 2 + (i + 0.5) * ((h.w + 0.4) / 7), h.h - 0.34, h.d / 2 + D / 2); g.add(st); }
+    const counter = new THREE.Mesh(new THREE.BoxGeometry(h.w - 1, 1.0, 0.7), wood); counter.position.set(0, 0.5, h.d / 2 + 0.9); g.add(counter);
+    const goods = ['#e86a5a', '#d9a35a', '#9fe0a0', '#e8c87a', '#9aa3ad', '#f0e0b0'];
+    for (let i = 0; i < 12; i++) { const it = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.1, 0.24, 8), new THREE.MeshStandardMaterial({ color: goods[i % goods.length], emissive: goods[i % goods.length], emissiveIntensity: 0.15 })); it.position.set(-h.w / 2 + 0.9 + (i % 6) * 0.9, 1.12, h.d / 2 + 0.9 + (i < 6 ? -0.15 : 0.15)); g.add(it); }
+    for (let k = 0; k < 2; k++) { const shelf = new THREE.Mesh(new THREE.BoxGeometry(h.w - 1, 0.08, 0.5), wood); shelf.position.set(0, 1.2 + k * 0.7, h.d / 2 + 0.3); g.add(shelf); }
+    const sign = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.6, 0.08), new THREE.MeshStandardMaterial({ color: '#e8c87a', emissive: '#6a4a1a', emissiveIntensity: 0.3 })); sign.position.set(-h.w / 2 - 0.1, h.h - 0.9, h.d / 2 + D + 0.2); sign.rotation.y = Math.PI / 2; g.add(sign);
+    const lamp = new THREE.PointLight('#ffc070', 3, 8, 1.6); lamp.position.set(0, h.h - 0.8, h.d / 2 + 1.5); g.add(lamp);
+    g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    this.group.add(g);
+    (this.houseGroups ||= []).push({ g, h });
   }
 
   // ---------------- 공동 베틀 ----------------

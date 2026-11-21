@@ -152,7 +152,7 @@ console.log('7) 상점 · 소지품 · 장비');
   g.command({ type: 'buy', item: 'aw1' }); g.command({ type: 'equip', item: 'aw1' });
   ok(p.equipment.weapon === 'gw1', '다른 직업 전용 장비는 장착 불가');
   const gold = p.gold; g.command({ type: 'sell', item: 'aw1' });
-  ok(p.gold === gold + 20 && !p.inventory.aw1, '판매 → 골드 증가');
+  ok(p.gold === gold + Math.round(60 * 0.4) && !p.inventory.aw1, '판매 → 골드 증가 (정가의 40%)');
   p.hp = 10; g.command({ type: 'quickPotion' });
   ok(p.hp > 10 && p.inventory.potion_s === 1 && p.cooldowns.potion > 0, `회복약 사용 → 체력 ${Math.round(p.hp)}, 재사용 대기`);
   g.command({ type: 'quickPotion' });
@@ -375,7 +375,7 @@ console.log('14) 일 돕기 · 히든 퀘스트');
   ok(!p.hidden.merchant_smuggle, '상인 히든: 다리가 끊어진 상태면 잠김 (세계 조건)');
 }
 
-console.log('15) 탐험 지도 · 질주 기력');
+console.log('15) 탐험 지도 · 질주 · 구르기 충전');
 {
   const { ExploreMap } = await import('../src/game/Explore.js');
   const { FEEL } = await import('../src/data/feel.js');
@@ -387,21 +387,20 @@ console.log('15) 탐험 지도 · 질주 기력');
   ok(ex2.isExplored(60, 60) && !ex2.isExplored(-90, 80), '탐험 기록 저장/불러오기');
   teleport(p, -80, 20);
   g.command({ type: 'sprint', on: true }); g.command({ type: 'moveDir', x: 1, z: 0 });
-  const s0 = p.stamina.value; const x0 = p.pos.x;
+  const x0 = p.pos.x;
   run(g, 1);
-  ok(p.stamina.value < s0 && p.pos.x - x0 > p.stats.moveSpeed * 1.3, `질주: 기력 ${s0} → ${p.stamina.value.toFixed(0)}, 1초에 ${(p.pos.x - x0).toFixed(1)}m`);
-  let wasLocked = false;
-  run(g, 7, () => { if (p.stamina.locked) wasLocked = true; });
-  ok(wasLocked, '기력 0 → 잠김');
+  ok(p.pos.x - x0 > p.stats.moveSpeed * 1.4, `질주: 1초에 ${(p.pos.x - x0).toFixed(1)}m (기본 ${p.stats.moveSpeed})`);
+  const x1 = p.pos.x; run(g, 8); const x2 = p.pos.x; run(g, 1);
+  ok(p.pos.x - x2 > p.stats.moveSpeed * 1.4 && !('stamina' in p), '질주는 제한 없음 (9초 뒤에도 같은 속도, 기력 없음)');
   g.command({ type: 'sprint', on: false }); g.command({ type: 'moveDir', x: 0, z: 0 });
-  p.stamina.value = 0; p.stamina.locked = true; p.stamina.lastUse = g.time;
-  run(g, 0.5);
-  ok(p.stamina.locked, '잠김: 회복 20% 전까지 질주 불가');
-  run(g, 2);
-  ok(!p.stamina.locked && p.stamina.value >= FEEL.move.unlockAt, `기력 회복 (${p.stamina.value.toFixed(0)})`);
-  p.stamina.value = 10;
+  p.cooldowns = {};
+  g.command({ type: 'skill', slot: 'dodge' }); run(g, 0.5);
+  g.command({ type: 'skill', slot: 'dodge' }); run(g, 0.5);
+  ok(p.dodge.charges === 0, '구르기 2회 충전 소모');
   g.command({ type: 'skill', slot: 'dodge' });
-  ok(!(p.fx.iframes > 0), '구르기도 기력을 쓴다 (부족하면 불가)');
+  ok(!(p.fx.iframes > 0), '충전이 없으면 구르기 불가');
+  run(g, FEEL.move.dodgeRecharge + 0.1);
+  ok(p.dodge.charges === 1, `${FEEL.move.dodgeRecharge}초 뒤 1회 회복`);
 }
 
 console.log('16) 타격감 설정 (feel.js) 검증');
@@ -423,6 +422,34 @@ console.log('16) 타격감 설정 (feel.js) 검증');
   teleport(dummy, p.pos.x + 2, p.pos.z); p.targetId = dummy.id; p.rot = Math.atan2(2, 0);
   for (let i = 0; i < 3; i++) { g.command({ type: 'skill', slot: 'basic', aim: { ...dummy.pos } }); run(g, 0.45); }
   ok(evs.length >= 3 && evs.every((d) => d.dir && d.hitStop > 0) && evs[2].weight === 'medium', '3연타: 방향·히트스톱 정보, 셋째 타는 더 무겁다');
+}
+
+console.log('17) 잡화점: 수량 · 되팔기 40% · 되사기 · 음식 · 귀환');
+{
+  const { ITEMS, sellPriceOf, SELL_RATE } = await import('../src/data/items.js');
+  const { g, p } = newGame('dyer');
+  const shop = [...g.entities.values()].find((e) => e.npcId === 'merchant');
+  teleport(p, shop.pos.x, shop.pos.z + 2);
+  p.gold = 500;
+  g.command({ type: 'buy', item: 'potion_s', count: 5 });
+  ok(p.inventory.potion_s === 5 && p.gold === 500 - 5 * 15, `수량 구입: 회복약 5개 (골드 ${p.gold})`);
+  const g0 = p.gold;
+  g.command({ type: 'sell', item: 'potion_s', count: 3 });
+  ok(p.inventory.potion_s === 2 && p.gold === g0 + 3 * Math.round(15 * SELL_RATE), `되팔기 정가의 40%: 3개 → +${p.gold - g0}`);
+  ok(p.buyback.length === 1 && p.buyback[0].count === 3, '되사기 목록에 기록');
+  const g1 = p.gold;
+  g.command({ type: 'buyback', index: 0 });
+  ok(p.inventory.potion_s === 5 && p.gold === g1 - 3 * sellPriceOf('potion_s') && p.buyback.length === 0, '되사기: 판 값 그대로 돌려받음');
+  g.command({ type: 'buy', item: 'warm_bread', count: 1 }); g.command({ type: 'useItem', item: 'warm_bread' });
+  p.hp = 10; run(g, 3);
+  ok(p.fx.food && p.hp > 10, '음식 효과: 지속 회복');
+  g.command({ type: 'buy', item: 'recall' });
+  teleport(p, 60, 60); p.lastCombat = -99;
+  g.command({ type: 'useItem', item: 'recall' }); run(g, 2.3);
+  ok(Math.hypot(p.pos.x - 0, p.pos.z - 10) < 2, '귀환 실타래: 2초 뒤 거점으로');
+  ok(g.serialize().personal.buyback !== undefined, '되사기 목록 저장');
+  g.command({ type: 'buy', item: 'potion_m' });
+  ok(!(p.inventory.potion_m > 0), '다리가 끊긴 동안 일부 물건은 입고 대기');
 }
 
 console.log(failures ? `\nFAIL (${failures})` : '\nOK');

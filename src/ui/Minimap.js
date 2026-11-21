@@ -84,6 +84,8 @@ export class Minimap {
         }
       }
     }
+    // 잡화점 아이콘
+    { const sx = (12 - p.pos.x) * scale, sy = (-10.6 - p.pos.z) * scale; if (sx * sx + sy * sy < (W / 2) ** 2) { ctx.save(); ctx.translate(sx, sy); ctx.rotate(-this.rot); ctx.fillStyle = '#ffe39a'; ctx.strokeStyle = '#3b2a1c'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(0, 0, 5.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.fillStyle = '#3b2a1c'; ctx.font = 'bold 8px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('상', 0, 3); ctx.restore(); } }
     // 목적지
     if (p.waypoint) {
       let x = (p.waypoint.x - p.pos.x) * scale, y = (p.waypoint.z - p.pos.z) * scale;

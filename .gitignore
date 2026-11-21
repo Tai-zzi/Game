@@ -4,3 +4,4 @@ dist
 .env.local
 .env
 tools/higgsfield/requests.log.jsonl
+tools/verify/out

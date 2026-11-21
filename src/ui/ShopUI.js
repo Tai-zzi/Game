@@ -1,11 +1,11 @@
-import { ITEMS, SHOP_STOCK, EQUIP_SLOTS } from '../data/items.js';
+import { ITEMS, SHOP_STOCK, EQUIP_SLOTS, SHOP_CATEGORIES, categoryOf, sellPriceOf } from '../data/items.js';
 import { ITEM_AI } from '../data/aiAssets.js';
 import { CLASSES } from '../data/classes.js';
 import { priceOf, inStock } from '../game/Shop.js';
 
 const $ = (id) => document.getElementById(id);
 const STAT = { atk: '공격력', def: '방어력', maxHp: '최대 체력', critChance: '치명타' };
-const TYPE = { consumable: '소모품', gear: '장비', material: '재료', loot: '전리품', keepsake: '출신 소지품' };
+const TYPE = { consumable: '소모품', gear: '장비', material: '재료', loot: '전리품', keepsake: '출신 소지품', misc: '잡화' };
 
 /**
  * 상점(사기/팔기) + 소지품 격자 + 장비 칸. 로직은 game/Shop.js (명령만 보낸다).
@@ -48,7 +48,7 @@ export class ShopUI {
     const bad = it.classes && !it.classes.includes(p.classId);
     return `<b>${it.name}</b> <small>${TYPE[it.type] || ''}${it.slot ? ` · ${EQUIP_SLOTS[it.slot]}` : ''}</small><br>${it.desc || ''}`
       + (stats ? `<br><span class="st">${stats}</span>` : '') + (cls ? `<br><small class="${bad ? 'bad' : ''}">착용: ${cls}</small>` : '')
-      + `<br><small>${it.price ? `구입 ${it.price}골드 · ` : ''}${it.sell ? `판매 ${it.sell}골드` : '팔 수 없음'} · 검증 전 예시</small>`;
+      + `<br><small>${it.price ? `구입 ${it.price}골드 · ` : ''}${sellPriceOf(id) ? `판매 ${sellPriceOf(id)}골드` : '팔 수 없음'} · 검증 전 예시</small>`;
   }
   showTip(id) { this.tip.innerHTML = this.tipHtml(id); this.tip.classList.remove('hidden'); }
   hideTip() { this.tip.classList.add('hidden'); }
@@ -81,31 +81,69 @@ export class ShopUI {
     this.inv.querySelectorAll('.cell[data-item]').forEach((c) => {
       const id = c.dataset.item;
       c.oncontextmenu = (e) => { e.preventDefault(); this.send({ type: 'useItem', item: id }); };
-      c.onclick = () => { if (this.open && ITEMS[id]?.sell && ITEMS[id].type !== 'keepsake') this.send({ type: 'sell', item: id, count: 1 }); };
+      c.onclick = () => { if (this.open && sellPriceOf(id) > 0) this.send({ type: 'sell', item: id, count: 1 }); };
     });
     this.inv.querySelectorAll('.eq[data-item]').forEach((c) => { c.oncontextmenu = (e) => { e.preventDefault(); this.send({ type: 'unequip', slot: c.dataset.slot }); }; c.onclick = c.oncontextmenu; });
   }
 
+  /** 잡화점: 사기(분류) · 팔기(정가 40%) · 되사기, 수량 선택 */
   renderShop(p) {
-    const stock = SHOP_STOCK.merchant;
-    const rows = this.tab === 'buy'
-      ? stock.map((id) => { const it = ITEMS[id]; const bad = it.classes && !it.classes.includes(p.classId); const pr = priceOf(this.game, p, id); const oos = inStock(this.game, id) !== true;
-        return `<div class="row ${p.gold < pr ? 'poor' : ''} ${bad || oos ? 'other' : ''}" data-item="${id}">${this.icon(id)}<span class="nm">${it.name}${oos ? ' <small>(다리 끊김 — 입고 대기)</small>' : ''}</span><span class="pr">${pr}골드${pr < it.price ? ' ♥' : ''}</span></div>`; }).join('')
-      : Object.entries(p.inventory).filter(([id, n]) => n > 0 && ITEMS[id]?.sell && ITEMS[id].type !== 'keepsake')
-        .map(([id, n]) => `<div class="row" data-item="${id}">${this.icon(id)}<span class="nm">${ITEMS[id].name} x${n}</span><span class="pr">${ITEMS[id].sell}골드</span></div>`).join('') || '<div class="qt-obj">팔 물건이 없습니다</div>';
-    this.shop.innerHTML = `<div class="qt-title">${this.game.player() && '현지 상인'} <small>· 골드만 받습니다</small><span class="x">✕</span></div>
-      <div class="tabs"><span class="${this.tab === 'buy' ? 'on' : ''}" data-tab="buy">사기</span><span class="${this.tab === 'sell' ? 'on' : ''}" data-tab="sell">팔기</span></div>
-      <div class="rows">${rows}</div><div class="inv-gold">${p.gold} 골드 · 클릭: ${this.tab === 'buy' ? '1개 구입 (Shift: 5개)' : '1개 판매 (Shift: 전부)'}</div>`;
+    const cat = this.cat || 'all';
+    const stock = SHOP_STOCK.merchant.filter((id) => cat === 'all' || categoryOf(id) === cat);
+    let rows = '';
+    if (this.tab === 'buy') {
+      rows = stock.map((id) => {
+        const it = ITEMS[id]; const bad = it.classes && !it.classes.includes(p.classId); const pr = priceOf(this.game, p, id); const oos = inStock(this.game, id) !== true;
+        return `<div class="row ${p.gold < pr ? 'poor' : ''} ${bad || oos ? 'other' : ''}" data-item="${id}" data-act="buy">${this.icon(id)}<span class="nm">${it.name}${oos ? ' <small>(다리 끊김 — 입고 대기)</small>' : ''}</span><span class="pr">${pr}골드${pr < it.price ? ' ♥' : ''}</span></div>`;
+      }).join('');
+    } else if (this.tab === 'sell') {
+      rows = Object.entries(p.inventory).filter(([id, n]) => n > 0 && sellPriceOf(id) > 0 && (cat === 'all' || categoryOf(id) === cat))
+        .map(([id, n]) => `<div class="row" data-item="${id}" data-act="sell">${this.icon(id)}<span class="nm">${ITEMS[id].name} x${n}</span><span class="pr">${sellPriceOf(id)}골드</span></div>`).join('') || '<div class="qt-obj">팔 물건이 없습니다</div>';
+    } else {
+      rows = (p.buyback || []).map((b, i) => `<div class="row ${p.gold < b.unit * b.count ? 'poor' : ''}" data-item="${b.itemId}" data-act="buyback" data-index="${i}">${this.icon(b.itemId)}<span class="nm">${ITEMS[b.itemId].name} x${b.count}</span><span class="pr">${b.unit * b.count}골드</span></div>`).join('') || '<div class="qt-obj">최근에 판 물건이 없습니다</div>';
+    }
+    const cats = ['all', ...Object.keys(SHOP_CATEGORIES)].map((c) => `<span class="${cat === c ? 'on' : ''}" data-cat="${c}">${c === 'all' ? '전체' : SHOP_CATEGORIES[c]}</span>`).join('');
+    this.shop.innerHTML = `<div class="qt-title">하르벤 잡화점 <small>· 골드만 받습니다 · 되팔기는 정가의 40%</small><span class="x">✕</span></div>
+      <div class="tabs">${[['buy', '사기'], ['sell', '팔기'], ['buyback', '되사기']].map(([k, l]) => `<span class="${this.tab === k ? 'on' : ''}" data-tab="${k}">${l}</span>`).join('')}</div>
+      ${this.tab !== 'buyback' ? `<div class="tabs cats">${cats}</div>` : ''}
+      <div class="rows">${rows}</div>
+      <div class="qty hidden"></div>
+      <div class="inv-gold">${p.gold} 골드 · 클릭: 수량 선택</div>`;
     this.shop.querySelector('.x').onclick = () => this.close();
     this.shop.querySelectorAll('[data-tab]').forEach((t) => { t.onclick = () => { this.tab = t.dataset.tab; this.renderShop(p); }; });
+    this.shop.querySelectorAll('[data-cat]').forEach((t) => { t.onclick = () => { this.cat = t.dataset.cat; this.renderShop(p); }; });
     this.bindTips(this.shop);
     this.shop.querySelectorAll('.row[data-item]').forEach((r) => {
-      r.onclick = (e) => {
-        const id = r.dataset.item;
-        if (this.tab === 'buy') this.send({ type: 'buy', item: id, count: e.shiftKey ? 5 : 1 });
-        else this.send({ type: 'sell', item: id, count: e.shiftKey ? 999 : 1 });
+      r.onclick = () => {
+        const id = r.dataset.item, act = r.dataset.act;
+        if (act === 'buyback') { this.send({ type: 'buyback', index: +r.dataset.index }); return; }
+        this.askQty(p, id, act);
       };
     });
+  }
+
+  /** 수량 선택 (− / + / 최대) */
+  askQty(p, id, act) {
+    const box = this.shop.querySelector('.qty');
+    const unit = act === 'buy' ? priceOf(this.game, p, id) : sellPriceOf(id);
+    const max = act === 'buy' ? Math.max(1, Math.min(99, Math.floor(p.gold / Math.max(1, unit)))) : (p.inventory[id] || 0);
+    let n = 1;
+    const draw = () => {
+      box.innerHTML = `<b>${ITEMS[id].name}</b> ${act === 'buy' ? '사기' : '팔기'}<div class="qrow"><button data-q="-10">-10</button><button data-q="-1">−</button><span>${n}</span><button data-q="1">+</button><button data-q="10">+10</button><button data-q="max">최대</button></div>
+        <div class="qrow"><span>합계 ${unit * n}골드</span><button class="primary" data-q="ok">${act === 'buy' ? '구입' : '판매'}</button><button data-q="cancel">취소</button></div>`;
+      box.querySelectorAll('[data-q]').forEach((bt) => {
+        bt.onclick = (e) => {
+          e.stopPropagation();
+          const q = bt.dataset.q;
+          if (q === 'ok') { this.send({ type: act, item: id, count: n }); box.classList.add('hidden'); return; }
+          if (q === 'cancel') { box.classList.add('hidden'); return; }
+          n = q === 'max' ? max : Math.max(1, Math.min(max, n + +q));
+          draw();
+        };
+      });
+    };
+    box.classList.remove('hidden');
+    draw();
   }
 
   bindTips(root) {

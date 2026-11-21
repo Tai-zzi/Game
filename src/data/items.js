@@ -44,8 +44,28 @@ Object.assign(ITEMS, {
   acc2: { id: 'acc2', name: '실 반지', type: 'gear', slot: 'accessory', classes: null, price: 50, sell: 16, color: '#ffd24a', stats: { atk: 1.5, critChance: 0.02 }, desc: '공용. 금실 한 가닥을 감았다.' },
 });
 
-/** 현지 상인 진열 목록 */
+Object.assign(ITEMS, {
+  antidote: { id: 'antidote', name: '해독제', type: 'consumable', price: 18, color: '#9fe0a0', cleanse: true, cooldown: 8,
+    desc: '찢김·독·둔화를 지운다. 회복약과 재사용 시간을 공유한다.' },
+  warm_bread: { id: 'warm_bread', name: '따뜻한 보리빵', type: 'consumable', price: 10, color: '#d9a35a', food: { regenPct: 0.01, time: 120 }, cooldown: 2,
+    desc: '음식 효과: 2분 동안 초당 최대 체력의 1% 회복 (전투 중에도). 다른 음식으로 덮어쓴다.' },
+  herb_stew: { id: 'herb_stew', name: '약초 스튜', type: 'consumable', price: 24, color: '#7aa84a', food: { regenPct: 0.006, def: 3, time: 300 }, cooldown: 2,
+    desc: '음식 효과: 5분 동안 방어력 +3, 초당 최대 체력의 0.6% 회복.' },
+  recall: { id: 'recall', name: '귀환 실타래', type: 'consumable', price: 30, color: '#e8c87a', recall: true, cooldown: 2,
+    desc: '실을 당겨 2초 뒤 하르벤 교역 거점으로 돌아간다. 맞으면 끊긴다.' },
+  whetstone: { id: 'whetstone', name: '숫돌', type: 'misc', price: 8, color: '#9aa3ad', desc: '잡화. 선물로 주면 좋아하는 사람이 있다.' },
+  candle: { id: 'candle', name: '밀랍 초', type: 'misc', price: 5, color: '#f0e0b0', desc: '잡화. 밤길을 밝힌다(장식).' },
+});
+
+/** 상점 분류 */
+export const SHOP_CATEGORIES = { consumable: '소모품', material: '재료', gear: '장비', misc: '잡화' };
+export const categoryOf = (id) => { const t = ITEMS[id]?.type; return t === 'loot' || t === 'keepsake' ? 'misc' : t; };
+/** 되팔기 비율: 정가의 40% (정가가 없는 전리품은 고정 매입가) — 검증 전 예시 */
+export const SELL_RATE = 0.4;
+export const sellPriceOf = (id) => { const it = ITEMS[id]; if (!it || it.type === 'keepsake') return 0; return it.price ? Math.max(1, Math.round(it.price * SELL_RATE)) : (it.sell || 0); };
+
+/** 잡화점 진열 목록 */
 export const SHOP_STOCK = {
-  merchant: ['potion_s', 'potion_m', 'salve', 'lumber', 'clamp', 'gw1', 'ga1', 'aw1', 'aa1', 'ew1', 'ea1', 'dw1', 'da1', 'acc1', 'acc2'],
+  merchant: ['potion_s', 'potion_m', 'antidote', 'salve', 'warm_bread', 'herb_stew', 'recall', 'lumber', 'clamp', 'gw1', 'ga1', 'aw1', 'aa1', 'ew1', 'ea1', 'dw1', 'da1', 'acc1', 'acc2', 'whetstone', 'candle'],
 };
 export const EQUIP_SLOTS = { weapon: '무기', armor: '방어구', accessory: '장신구' };

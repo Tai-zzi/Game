@@ -65,7 +65,7 @@ export const NPCS = {
   },
   merchant: {
     id: 'merchant', name: '현지 상인', title: '교역 거점 잡화 · 이름 미정', modelId: 'npc_merchant',
-    pos: { x: 5, z: -9 }, rot: Math.PI * 0.1,
+    pos: { x: 12, z: -10.6 }, rot: 0,
     // 개정안에 개별 설정이 없어 단면용 초안 (미정)
     desire: '다리가 다시 열려 물건이 흐르는 것',
     speech: '빠른 장사꾼 존댓말.',

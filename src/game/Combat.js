@@ -43,6 +43,7 @@ export function dealDamage(game, src, tgt, mult, opts = {}) {
     gainResource(game, tgt, SKILLS.g_shield.gainPerBlock);
     tgt.res.counterUntil = game.time + 2;
   }
+  if (fx.food?.def) dmg = Math.max(1, dmg - fx.food.def * 0.5);
   if (fx.guard) dmg *= 1 - fx.guard.v;
   if (fx.protect) dmg *= 1 - fx.protect.v;
   dmg = Math.max(1, Math.round(dmg));
@@ -149,6 +150,12 @@ export function updateEffects(game, e, dt) {
     e.hp = Math.max(1, e.hp - fx.bleed.dps * dt); // 지속 피해만으로는 쓰러지지 않는다 (검증 전 예시)
     if (fx.bleed.t <= 0) fx.bleed = null;
   }
+  if (fx.food) {
+    fx.food.t -= dt;
+    fx.food.acc += e.stats.maxHp * fx.food.regenPct * dt;
+    if (fx.food.acc >= 1) { const n = Math.floor(fx.food.acc); fx.food.acc -= n; e.hp = Math.min(e.stats.maxHp, e.hp + n); }
+    if (fx.food.t <= 0) fx.food = null;
+  }
   if (fx.hot) {
     fx.hot.t -= dt;
     fx.hot.acc += fx.hot.perSec * dt;
@@ -213,8 +220,7 @@ export function useSkill(game, p, slot, aim, phase = 'press') {
   if (p.stun > 0) return '움직일 수 없습니다';
   if ((p.actionLock > 0 || p.charging || p.holding) && slot !== 'dodge') return 'busy';
   if (slot === 'dodge') {
-    const st = p.stamina;
-    if (st && (st.locked || st.value < FEEL.move.dodgeCost)) return '기력이 부족합니다';
+    if (p.dodge && p.dodge.charges <= 0) return '구르기를 다시 쓸 수 없습니다 (충전 중)';
     p.charging = null; if (p.holding) endHold(game, p);
   }
 
@@ -276,7 +282,7 @@ export function useSkill(game, p, slot, aim, phase = 'press') {
   if (cast.targetId && game.get(cast.targetId)?.kind === 'monster') p.targetId = cast.targetId;
   if (sk.ult) { p.fx.iframes = Math.max(p.fx.iframes || 0, S.windup + S.recovery); game.bus.emit('ultimate', { id: p.id, skillId, windup: S.windup }); }
 
-  if (slot === 'dodge' && p.stamina) { p.stamina.value -= FEEL.move.dodgeCost; p.stamina.lastUse = game.time; }
+  if (slot === 'dodge' && p.dodge) p.dodge.charges--;
   if (sk.cast === 'charge') {
     p.charging = { ...cast, t0: game.time };
     p.actionLock = sk.charge.max + 0.6;

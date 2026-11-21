@@ -311,3 +311,10 @@ button.primary:hover { background: #95603a; }
 .dmg.callout.head { color: #ffb84a; } .dmg.callout.back { color: #c890ff; }
 @keyframes shine { 0% { background-position: 150% 0; } 100% { background-position: -50% 0; } }
 .dmg[data-hits]::after { content: attr(data-hits); font-size: 0.5em; margin-left: 3px; opacity: 0.8; }
+
+.tabs.cats span { font-size: 11px; padding: 2px; }
+.qty { margin-top: 6px; padding: 8px; border-radius: 8px; background: rgba(0,0,0,0.35); border: 1px solid rgba(232,200,122,0.4); font-size: 13px; }
+.qrow { display: flex; gap: 4px; align-items: center; margin-top: 5px; }
+.qrow span { flex: 1; text-align: center; font-weight: 700; }
+.qrow button { background: rgba(255,255,255,0.1); color: #f6e9cf; border: 1px solid rgba(232,200,122,0.4); border-radius: 5px; padding: 3px 7px; cursor: pointer; }
+.qrow button.primary { background: #7a4b2a; }

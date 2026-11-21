@@ -13,7 +13,7 @@ export const PLACES = {
   office: { name: '연맹 지부 책상', x: -4, z: 6 },
   yard: { name: '훈련장', x: 9, z: 1 },
   clinic: { name: '진료소', x: -10, z: -2 },
-  stall: { name: '상인 좌판', x: 5, z: -8 },
+  stall: { name: '잡화점 계산대', x: 12, z: -10.6 },
   cargo: { name: '수레 짐터', x: 13, z: 3 },
   bridge_site: { name: '다리 공사장', x: 37, z: 6 },
   herb_field: { name: '숲 가장자리 약초밭', x: -24, z: 16 },
@@ -23,7 +23,7 @@ export const PLACES = {
   home_dale: { name: '데일 가족 집', x: -17.2, z: 14.4, home: true },
   home_mora: { name: '모라의 집(진료소 뒤)', x: -15.4, z: -4.2, home: true },
   home_haila: { name: '지부 숙소', x: -3.6, z: -15.2, home: true },
-  home_merchant: { name: '상인의 집', x: 10.8, z: -7.2, home: true },
+  home_merchant: { name: '잡화점 뒤 살림방', x: 15.2, z: -10.4, home: true },
   bunk: { name: '짐꾼 숙소(방앗간)', x: 39.5, z: 1.3, home: true },
   depot: { name: '동쪽 창고', x: 68, z: 3 },
 };
@@ -37,7 +37,7 @@ export const NODES = {
 export const EDGES = [
   ['j_c', 'j_w'], ['j_c', 'j_e'], ['j_c', 'j_n'], ['j_c', 'j_s'], ['j_c', 'commons'], ['j_w', 'office'], ['j_w', 'clinic'],
   ['j_e', 'yard'], ['j_e', 'cargo'], ['j_e', 'j_road'], ['j_road', 'bridge_site'], ['j_road', 'mill_yard'], ['mill_yard', 'bunk'],
-  ['j_s', 'j_sw'], ['j_s', 'j_se'], ['j_s', 'home_haila'], ['j_sw', 'home_mora'], ['j_sw', 'clinic'], ['j_se', 'stall'], ['j_se', 'home_merchant'],
+  ['j_s', 'j_sw'], ['j_s', 'j_se'], ['j_s', 'home_haila'], ['j_sw', 'home_mora'], ['j_sw', 'clinic'], ['j_se', 'stall'], ['stall', 'home_merchant'],
   ['j_n', 'j_nw'], ['j_n', 'j_ne'], ['j_ne', 'home_harck'], ['j_nw', 'home_dale'], ['j_nw', 'j_fw'], ['j_fw', 'herb_field'], ['j_fw', 'farm'],
   ['j_w', 'j_fw'], ['j_e', 'j_ne'], ['j_se', 'j_e'],
 ];
@@ -154,5 +154,5 @@ export const DESKS = {
   office_board: { name: '연맹 계약 게시판', serviceOf: 'haila', x: -6.5, z: 7.5 },
   yard_board: { name: '호위 모집판', serviceOf: 'belo', x: 11.5, z: 6 },
   clinic_bell: { name: '진료소 종', serviceOf: 'mora', x: -8, z: 0.5 },
-  stall_ledger: { name: '좌판 장부', serviceOf: 'merchant', x: 7, z: -10 },
+  stall_ledger: { name: '잡화점 종 (밤에도 장부로 거래)', serviceOf: 'merchant', x: 9.4, z: -9.4 },
 };

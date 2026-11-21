@@ -62,8 +62,9 @@ export class GameState {
     p.cosmetics = [...(save?.personal?.cosmetics || [])];
     p.title = save?.personal?.title || null;
     p.helpTask = null;
+    p.buyback = [...(save?.personal?.buyback || [])];
     p.waypoint = save?.personal?.waypoint || null;
-    p.stamina = { value: FEEL.move.max, locked: false, lastUse: -99 };
+    p.dodge = { charges: FEEL.move.dodgeCharges, t: 0 };
     p.sprint = false;
     p.contracts = { active: null, done: { ...(save?.personal?.contracts?.done || {}) } };
     p.contribs = { ...(save?.personal?.contribs || {}) };
@@ -210,6 +211,7 @@ export class GameState {
       case 'debugDummy': this.spawnDummy(p); break;
       case 'buy': fail(Shop.buy(this, p, cmd.item, cmd.count)); break;
       case 'sell': fail(Shop.sell(this, p, cmd.item, cmd.count)); break;
+      case 'buyback': fail(Shop.buyback(this, p, cmd.index)); break;
       case 'equip': fail(Shop.equip(this, p, cmd.item)); break;
       case 'unequip': fail(Shop.unequip(this, p, cmd.slot)); break;
       case 'useItem': fail(Shop.useItem(this, p, cmd.item)); break;
@@ -218,16 +220,13 @@ export class GameState {
     }
   }
 
-  // ───────────── 질주 · 기력 (구르기와 공유) ─────────────
-  sprinting(p) { return p.sprint && !p.stamina.locked && p.stamina.value > 0 && (p.moving || p.move.target || p.move.dir.x || p.move.dir.z || p.attackTargetId); }
-  updateStamina(p, dt) {
-    const M = FEEL.move, s = p.stamina;
-    if (this.sprinting(p) && p.lastMoveT > this.time - 0.15) {
-      s.value = Math.max(0, s.value - (this.time - p.lastCombat < 5 ? M.combatDrain : M.drain) * dt);
-      s.lastUse = this.time;
-      if (s.value <= 0) { s.locked = true; this.bus.emit('staminaOut', {}); }
-    } else if (this.time - s.lastUse > M.regenDelay) s.value = Math.min(M.max, s.value + M.regen * dt);
-    if (s.locked && s.value >= M.unlockAt) s.locked = false;
+  // ───────────── 질주 (제한 없음) · 구르기 충전 ─────────────
+  sprinting(p) { return !!p.sprint && !!(p.moving || p.move.target || p.move.dir.x || p.move.dir.z || p.attackTargetId); }
+  updateDodge(p, dt) {
+    const M = FEEL.move, d = p.dodge;
+    if (d.charges >= M.dodgeCharges) { d.t = 0; return; }
+    d.t += dt;
+    if (d.t >= M.dodgeRecharge) { d.t = 0; d.charges++; }
   }
 
   // ───────────── 일 돕기 (매일 1회) · 관계 퀘스트 · 약초 연고 ─────────────
@@ -343,7 +342,7 @@ export class GameState {
   updatePlayer(p, dt) {
     if (!p.alive) { if (this.time >= p.respawnAt) this.respawnPlayer(p); return; }
     updateResource(this, p, dt);
-    this.updateStamina(p, dt);
+    this.updateDodge(p, dt);
     updateCast(this, p, p.aimPt);
     p.moving = false;
     // 구르기 이동
@@ -418,9 +417,10 @@ export class GameState {
     p.channel = null;
     const e = this.get(c.targetId);
     this.bus.emit('channelEnd', { id: p.id, kind: c.kind });
-    if (!e) return;
+    if (!e && c.kind !== 'recall') return;
     if (c.kind === 'gather') { this.giveItem(p, e.data.item, 1 + (this.rng() < 0.4 ? 1 : 0), e.pos); e.readyAt = this.time + 20; }
     if (c.kind === 'craft') this.contracts.craft(p, 'brace');
+    if (c.kind === 'recall') { p.pos.x = HARVEN.playerSpawn.x; p.pos.z = HARVEN.playerSpawn.z; p.move.target = null; this.bus.emit('recall', {}); this.log('실을 따라 교역 거점으로 돌아왔습니다.', 'system'); return; }
     if (c.kind === 'help') return this.helpProgress(p, e);
     if (c.kind === 'investigate') {
       const first = !(p.records.clues || []).includes(e.data.id);
@@ -480,7 +480,7 @@ export class GameState {
         if (lat < w.width / 2 && along < r + 0.3 && along > -0.8) { e.pos.x += fx * (r + 0.3 - along); e.pos.z += fz * (r + 0.3 - along); }
       }
       const hr = HARVEN.hubRadius, dh = Math.hypot(e.pos.x, e.pos.z);
-      if (dh < hr) { e.pos.x *= hr / Math.max(dh, 0.01); e.pos.z *= hr / Math.max(dh, 0.01); }
+      if (dh < hr && !e.dummy) { e.pos.x *= hr / Math.max(dh, 0.01); e.pos.z *= hr / Math.max(dh, 0.01); }
     }
     if (e.kind === 'player' || e.kind === 'monster') {
       for (const n of this.entities.values()) {
@@ -586,6 +586,7 @@ export class GameState {
         relations: structuredClone(p.relations),
         contracts: { done: { ...p.contracts.done } }, // 진행 중 계약은 저장하지 않음 (다음 접속에 처음부터, 벌칙 없음)
         contribs: { ...p.contribs },
+        buyback: (p.buyback || []).slice(0, 8),
         records: { clues: [...(p.records.clues || [])], log: p.records.log.slice(-30), letters: p.records.letters.slice(-20), pois: [...p.records.pois] },
         hidden: structuredClone(p.hidden), cosmetics: [...p.cosmetics], title: p.title, waypoint: p.waypoint, explored: this.explore.serialize(),
         lastSeen: this.snapshot(),

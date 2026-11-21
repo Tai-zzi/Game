@@ -15,7 +15,7 @@ export const HARVEN = {
   waterLevel: -0.45,
   houses: [
     { x: -14, z: -8, w: 7, d: 6, h: 3.4, roof: '#a8553a' },
-    { x: 12, z: -11, w: 6, d: 6, h: 3.0, roof: '#8a5a3c' },
+    { x: 12, z: -12.8, w: 7, d: 2.6, h: 3.4, roof: '#8a5a3c', shop: true }, // 잡화점 (앞이 트인 가게 — 뒤 창고만 막힘)
     { x: -16, z: 10, w: 6, d: 7, h: 3.2, roof: '#b4673f' },
     { x: 15, z: 9, w: 7, d: 5, h: 3.0, roof: '#9c4f36' },
     { x: -2, z: -19, w: 8, d: 6, h: 3.8, roof: '#7d4a33' },

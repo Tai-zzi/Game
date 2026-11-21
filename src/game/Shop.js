@@ -1,4 +1,5 @@
-import { ITEMS, SHOP_STOCK } from '../data/items.js';
+import { ITEMS, SHOP_STOCK, sellPriceOf } from '../data/items.js';
+import { HARVEN } from '../data/zones.js';
 import { NPCS } from '../data/npcs.js';
 import { dist2D } from '../core/math.js';
 import { applyStats } from './Entity.js';
@@ -56,14 +57,35 @@ export function sell(game, p, itemId, count = 1, shopId = 'merchant') {
   const it = ITEMS[itemId];
   const have = p.inventory[itemId] || 0;
   count = Math.min(Math.max(1, Math.floor(count)), have);
-  if (!it?.sell || count <= 0) return '팔 수 없는 물건입니다';
-  if (it.type === 'keepsake') return '출신 소지품은 팔 수 없습니다';
+  if (it?.type === 'keepsake') return '출신 소지품은 팔 수 없습니다';
+  const unit = sellPriceOf(itemId);
+  if (!unit || count <= 0) return '팔 수 없는 물건입니다';
   p.inventory[itemId] = have - count;
-  const gain = it.sell * count;
+  const gain = unit * count;
+  // 되사기 목록 (최근 판매 8건, 판 값 그대로 되살 수 있다)
+  (p.buyback ||= []).unshift({ itemId, count, unit });
+  p.buyback.length = Math.min(p.buyback.length, 8);
   p.gold += gain;
   game.bus.emit('trade', { kind: 'sell', itemId, count, gold: gain });
   game.bus.emit('inventory', {});
   game.log(`${it.name} x${count} 판매 (+${gain} 골드)`, 'loot');
+  return true;
+}
+
+/** 되사기: 최근에 판 물건을 판 값 그대로 돌려받는다 */
+export function buyback(game, p, index) {
+  const near = nearShop(game, p);
+  if (near !== true) return near;
+  const b = p.buyback?.[index];
+  if (!b) return '되살 물건이 없습니다';
+  const cost = b.unit * b.count;
+  if (p.gold < cost) return '골드가 부족합니다';
+  p.gold -= cost;
+  p.inventory[b.itemId] = (p.inventory[b.itemId] || 0) + b.count;
+  p.buyback.splice(index, 1);
+  game.bus.emit('trade', { kind: 'buyback', itemId: b.itemId, count: b.count, gold: -cost });
+  game.bus.emit('inventory', {});
+  game.log(`${ITEMS[b.itemId].name} x${b.count} 되삼 (-${cost} 골드)`, 'loot');
   return true;
 }
 
@@ -102,11 +124,15 @@ export function useItem(game, p, itemId) {
   if (it?.type !== 'consumable') return '사용할 수 없습니다';
   if (!(p.inventory[itemId] > 0)) return '가지고 있지 않습니다';
   if (!p.alive) return '쓰러진 상태입니다';
-  if ((p.cooldowns.potion || 0) > 0) return `아직 쓸 수 없습니다 (${p.cooldowns.potion.toFixed(1)}초)`;
+  const cdKey = it.food || it.recall ? `item_${itemId}` : 'potion';
+  if ((p.cooldowns[cdKey] || 0) > 0) return `아직 쓸 수 없습니다 (${p.cooldowns[cdKey].toFixed(1)}초)`;
+  if (it.recall && game.time - p.lastCombat < 5) return '전투 중에는 귀환할 수 없습니다';
   p.inventory[itemId] -= 1;
-  p.cooldowns.potion = it.cooldown;
+  p.cooldowns[cdKey] = it.cooldown;
   if (it.heal) heal(game, null, p, p.stats.maxHp * it.heal);
   if (it.cleanse) { p.fx.bleed = null; p.fx.slow = null; }
+  if (it.food) p.fx.food = { ...it.food, t: it.food.time, acc: 0 };
+  if (it.recall) { p.channel = { targetId: null, t: 0, dur: 2, kind: 'recall' }; game.bus.emit('channelStart', { id: p.id, kind: 'recall', dur: 2, name: it.name }); }
   game.bus.emit('itemUsed', { id: p.id, itemId });
   game.bus.emit('inventory', {});
   return true;

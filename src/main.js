@@ -270,7 +270,6 @@ function startGame(profile, saveData) {
   bus.on('familyEvent', ({ kind, child, guardian }) => { if (kind === 'childHurt') hud.log(`[주민] ${NPCS[child].name}이(가) 놀다 넘어졌다. ${NPCS[guardian]?.name || '보호자'}가 진료소로 데려간다.`, 'system'); });
   bus.on('gift', ({ liked, disliked }) => hud.toast(liked ? '반가워한다' : disliked ? '표정이 굳는다' : '고맙다며 받는다'));
   bus.on('newDay', ({ day }) => hud.log(`— ${day}일째 아침 —`, 'system'));
-  bus.on('staminaOut', () => hud.toast('기력이 바닥났다'));
   bus.on('waypoint', () => Sfx.play('click'));
   bus.on('shopOpen', () => { dialog.close(); shop.openShop(); });
   bus.on('clue', ({ name, text, first }) => { if (first) hud.showSummary([], `<b>${name}</b><br>${text}`); });

@@ -162,8 +162,7 @@ export class HUD {
     // 시계 · 기력
     const life = g.life;
     if (life) this.set('clock', life.clockText, (v) => { $('clock').innerHTML = `${life.isNight ? '☾' : '☀'} ${v} <small>${life.day}일째</small>`; });
-    const st = p.stamina;
-    if (st) this.set('stam', `${Math.round(st.value)}:${st.locked}`, () => { $('stamina-fill').style.width = `${st.value}%`; $('stamina').classList.toggle('locked', st.locked); $('stamina').classList.toggle('full', st.value >= 99.5); });
+    if (p.dodge && this.slots?.dodge) this.set('dodgeCh', p.dodge.charges, (v) => { this.slots.dodge.cdt.textContent = v < 2 ? `${v}` : ''; this.slots.dodge.root.classList.toggle('disabled', v <= 0); });
     // 계약 추적
     const prog = g.contracts.progress(p);
     this.set('contract', JSON.stringify([prog, p.hidden, p.helpTask?.left]), () => this.renderContract(prog));
