@@ -2,6 +2,7 @@ import { NPCS } from '../data/npcs.js';
 import { CONTRACTS } from '../data/contracts.js';
 import { CLASSES, CLASS_ORDER } from '../data/classes.js';
 import { ITEMS } from '../data/items.js';
+import { ARCHETYPES, ADVANCE_LEVEL } from '../data/archetypes.js';
 import { Relations } from './WorldState.js';
 import { AFFINITY } from '../data/npcs.js';
 import { HELP_TASKS, VILLAGERS, VILLAGER_HELP, HOUSEHOLDS } from '../data/households.js';
@@ -84,6 +85,17 @@ function coreDialog(game, p, npcId, page = 'main') {
     }
     case 'trainer': {
       const can = game.canChangeClass(p);
+      if (!p.advanced) {
+        const A = ARCHETYPES[p.archetype];
+        const lines = [`${A.name} 계열 견습이군요. Lv ${ADVANCE_LEVEL}이 되면 심화 직업으로 전직할 수 있어요. 지금 Lv ${p.level}.`];
+        if (A.lifeFocus) lines.push(A.note);
+        const opts = [];
+        if (p.level >= ADVANCE_LEVEL && can === true) for (const a of A.advances) opts.push(a.playable ? { label: `「${a.name}」(으)로 전직`, action: { type: 'advance', classId: a.id } } : { label: `「${a.name}」 — 준비 중`, secondary: true });
+        else if (p.level >= ADVANCE_LEVEL) lines.push(`지금은 안 돼요: ${can}`);
+        else lines.push(`심화 직업: ${A.advances.map((a) => a.name + (a.playable ? '' : ' (준비 중)')).join(' · ') || '없음 — 생업을 중심으로 성장'}`);
+        opts.push(close);
+        return { ...base, title: '전직 · 공개 교육', lines, options: opts };
+      }
       const lines = [...npc.greeting];
       if (can !== true) lines.push(`지금은 안 돼요: ${can}`);
       const opts = can === true ? CLASS_ORDER.filter((c) => c !== p.classId).map((c) => ({ label: `${CLASSES[c].name}로 전환 (${CLASSES[c].role})`, action: { type: 'changeClass', classId: c } })) : [];

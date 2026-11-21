@@ -4,6 +4,8 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
+import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 import { clamp, lerp } from '../core/math.js';
 
 /**
@@ -15,10 +17,10 @@ import { clamp, lerp } from '../core/math.js';
 const GradeShader = {
   uniforms: {
     tDiffuse: { value: null },
-    uVignette: { value: 0.32 },
-    uSaturation: { value: 1.08 },
-    uWarmth: { value: 0.035 },
-    uContrast: { value: 1.05 },
+    uVignette: { value: 0.28 },
+    uSaturation: { value: 0.92 },
+    uWarmth: { value: 0.012 },
+    uContrast: { value: 1.06 },
     uFlash: { value: 0 },
     uChroma: { value: 0 },
     uBlur: { value: 0 },
@@ -69,11 +71,11 @@ export class Renderer {
 
     this.scene = new THREE.Scene();
     const horizon = new THREE.Color('#f3d9b8');
-    this.scene.fog = new THREE.Fog(horizon, 60, 160);
+    this.scene.fog = new THREE.FogExp2(new THREE.Color('#b9c4cc'), 0.0032); // 대기 원근
     this.scene.background = horizon;
     this.addSky();
 
-    this.camera = new THREE.PerspectiveCamera(38, window.innerWidth / window.innerHeight, 0.5, 400);
+    this.camera = new THREE.PerspectiveCamera(38, window.innerWidth / window.innerHeight, 0.5, 2600);
     this.camDir = new THREE.Vector3(0.62, 1.0, 0.78).normalize();
     this.zoom = 24; this.zoomTarget = 24;
     this.zoomMin = 13; this.zoomMax = 34;
@@ -81,9 +83,9 @@ export class Renderer {
     this.trauma = 0; this.punch = 0; this.t = 0;
     this.flash = 0;
 
-    this.hemi = new THREE.HemisphereLight('#ffe9c9', '#5a6b3a', 0.7);
+    this.hemi = new THREE.HemisphereLight('#dfe8f0', '#4a5238', 0.25); // 환경광(HDRI)이 주 간접광
     this.scene.add(this.hemi);
-    this.sun = new THREE.DirectionalLight('#ffd7a0', 2.6);
+    this.sun = new THREE.DirectionalLight('#fff0dc', 3.0);
     this.sun.castShadow = true;
     const sc = this.sun.shadow.camera;
     sc.left = -30; sc.right = 30; sc.top = 30; sc.bottom = -30; sc.near = 1; sc.far = 140;
@@ -97,6 +99,7 @@ export class Renderer {
     this.scene.add(rim);
 
     this.buildEnvironment();
+    this.loadHDRI();
     this.setupComposer();
     this.setQuality(quality);
 
@@ -133,10 +136,28 @@ export class Renderer {
     pmrem.dispose();
   }
 
+  /** 실제 하늘 HDRI (Poly Haven CC0): 배경 + 환경광 반사 */
+  loadHDRI() {
+    const url = (import.meta.env?.BASE_URL || './') + 'assets/polyhaven/hdri/kloofendal_48d_partly_cloudy_puresky_2k.hdr';
+    new RGBELoader().load(url, (tex) => {
+      tex.mapping = THREE.EquirectangularReflectionMapping;
+      const pmrem = new THREE.PMREMGenerator(this.renderer);
+      this.scene.environment = pmrem.fromEquirectangular(tex).texture;
+      pmrem.dispose();
+      this.hdr = tex;
+      this.scene.background = tex;
+      this.sky.visible = false;
+      this.setTimeOfDay(this.lastHour ?? 9);
+    }, undefined, (e) => console.warn('[Renderer] HDRI 로드 실패 → 그라데이션 하늘', e));
+  }
+
   setupComposer() {
     const size = new THREE.Vector2(window.innerWidth, window.innerHeight);
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
+    this.gtao = new GTAOPass(this.scene, this.camera, size.x, size.y);
+    this.gtao.blendIntensity = 0.85;
+    this.composer.addPass(this.gtao);
     this.bloom = new UnrealBloomPass(size, 0.65, 0.45, 1.1);
     this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());
@@ -153,6 +174,7 @@ export class Renderer {
     this.sun.shadow.mapSize.set(high ? 2048 : 1024, high ? 2048 : 1024);
     if (this.sun.shadow.map) { this.sun.shadow.map.dispose(); this.sun.shadow.map = null; }
     this.renderer.shadowMap.type = high ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
+    if (this.gtao) this.gtao.enabled = high;
     this.resize();
   }
 
@@ -177,12 +199,17 @@ export class Renderer {
     this.hemi.intensity = 0.28 + day * 0.45;
     const top = c('#0e1530', '#6f9fd6', day).lerp(new THREE.Color('#5a4a8a'), dusk * 0.5);
     const mid = c('#2a2a48', '#f6d7b0', day).lerp(new THREE.Color('#ff9a6a'), dusk * 0.6);
+    this.lastHour = h;
     this.skyMat.uniforms.top.value.copy(top);
     this.skyMat.uniforms.mid.value.copy(mid);
     this.skyMat.uniforms.bottom.value.copy(mid);
-    this.scene.fog.color.copy(mid);
-    this.scene.background = this.scene.fog.color;
-    this.renderer.toneMappingExposure = 0.85 + day * 0.15;
+    if (this.hdr) {
+      this.scene.background = this.hdr;
+      this.scene.backgroundIntensity = 0.06 + day * 0.94;
+      this.scene.environmentIntensity = 0.12 + day * 0.88;
+      this.scene.fog.color.copy(c('#141a26', '#b9c4cc', day)).lerp(new THREE.Color('#d8a080'), dusk * 0.45);
+    } else { this.scene.fog.color.copy(mid); this.scene.background = this.scene.fog.color; }
+    this.renderer.toneMappingExposure = 0.75 + day * 0.25;
     // 해의 방향: 아침 동쪽 → 저녁 서쪽 (그림자 길이 변화)
     const a = ((h - 6) / 12) * Math.PI;
     this.sunOffset.set(Math.cos(a) * -40, 20 + Math.sin(Math.max(0.15, Math.min(Math.PI - 0.15, a))) * 40, 22);

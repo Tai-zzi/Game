@@ -6,6 +6,7 @@ import { ORIGINS } from '../data/origins.js';
 import { CLASSES, statsFor, xpToNext, MAX_LEVEL_SLICE } from '../data/classes.js';
 import { SKILLS } from '../data/skills.js';
 import { BRIDGE_EVENT } from '../data/contracts.js';
+import { ARCHETYPES, ADVANCE_LEVEL, archetypeOfClass } from '../data/archetypes.js';
 import { makeRng, randInt, dist2D, angleTo, clamp } from '../core/math.js';
 import { createPlayer, createMonster, createNpc, createInteractable, setClass, applyStats } from './Entity.js';
 import * as Shop from './Shop.js';
@@ -23,7 +24,7 @@ import { DESKS, HELP_TASKS, PLACES, VILLAGERS } from '../data/households.js';
 import { AFFINITY } from '../data/npcs.js';
 import { FEEL } from '../data/feel.js';
 
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 
 /**
  * 순수 게임 상태/규칙 (three.js·DOM 의존 없음 → Node 서버에서도 실행 가능).
@@ -56,13 +57,16 @@ export class GameState {
    */
   init(profile, save = null) {
     const ch = save?.character;
-    const p = createPlayer(this.nextId++, { name: profile.name, origin: profile.origin, classId: profile.classId, character: ch });
+    const startClass = ch?.classId || (profile.archetype ? ARCHETYPES[profile.archetype].novice : profile.classId);
+    const p = createPlayer(this.nextId++, { name: profile.name, origin: profile.origin, classId: startClass, character: ch });
+    p.archetype = ch?.archetype || profile.archetype || archetypeOfClass(startClass);
     p.relations = migrateRelations(structuredClone(save?.personal?.relations || {}));
     p.hidden = structuredClone(save?.personal?.hidden || {});
     p.cosmetics = [...(save?.personal?.cosmetics || [])];
     p.title = save?.personal?.title || null;
     p.helpTask = null;
     p.buyback = [...(save?.personal?.buyback || [])];
+    p.anchors = [...(save?.personal?.anchors || ['town'])];
     p.waypoint = save?.personal?.waypoint || null;
     p.dodge = { charges: FEEL.move.dodgeCharges, t: 0 };
     p.sprint = false;
@@ -196,6 +200,7 @@ export class GameState {
         this.log('모라가 새끼 양을 보러 가겠다며 장부에 적습니다.', 'system');
         break;
       case 'changeClass': fail(this.changeClass(p, cmd.classId)); break;
+      case 'advance': fail(this.advance(p, cmd.classId)); break;
       case 'talkBelief': { const r = dailyTalk(this, p, cmd.npcId, cmd.tag); if (r !== true) fail(r); break; }
       case 'gift': { const r = giveGift(this, p, cmd.npcId, cmd.item); if (typeof r === 'string') fail(r); break; }
       case 'helpVillager': { const r = helpVillager(this, p, cmd.npcId); this.bus.emit('npcSay', { npcId: cmd.npcId, text: r }); break; }
@@ -212,12 +217,33 @@ export class GameState {
       case 'buy': fail(Shop.buy(this, p, cmd.item, cmd.count)); break;
       case 'sell': fail(Shop.sell(this, p, cmd.item, cmd.count)); break;
       case 'buyback': fail(Shop.buyback(this, p, cmd.index)); break;
+      case 'travel': fail(this.travel(p, cmd.id)); break;
       case 'equip': fail(Shop.equip(this, p, cmd.item)); break;
       case 'unequip': fail(Shop.unequip(this, p, cmd.slot)); break;
       case 'useItem': fail(Shop.useItem(this, p, cmd.item)); break;
       case 'quickPotion': fail(Shop.quickPotion(this, p)); break;
       case 'openShop': if (fail(Shop.nearShop(this, p)) === true) this.bus.emit('shopOpen', { shopId: 'merchant' }); break;
     }
+  }
+
+  // ───────────── 실 매듭돌: 발견 → 빠른 이동 ─────────────
+  checkAnchors(p) {
+    for (const a of HARVEN.anchors) {
+      if (p.anchors.includes(a.id) || Math.hypot(p.pos.x - a.x, p.pos.z - a.z) > 6) continue;
+      p.anchors.push(a.id);
+      this.bus.emit('anchorFound', { id: a.id, name: a.name });
+      this.log(`[발견] ${a.name} — 지도(M)에서 눌러 빠르게 이동할 수 있습니다.`, 'quest');
+    }
+  }
+  travel(p, id) {
+    const a = HARVEN.anchors.find((x) => x.id === id);
+    if (!a || !p.anchors.includes(id)) return '아직 찾지 못한 매듭돌입니다';
+    if (!p.alive) return '쓰러진 상태입니다';
+    if (this.time - p.lastCombat < 5) return '전투 중에는 이동할 수 없습니다';
+    if (p.contracts.active?.cartId) return '호송 중에는 이동할 수 없습니다';
+    p.channel = { targetId: null, t: 0, dur: 2.5, kind: 'travel', anchor: id };
+    this.bus.emit('channelStart', { id: p.id, kind: 'travel', dur: 2.5, name: a.name });
+    return true;
   }
 
   // ───────────── 질주 (제한 없음) · 구르기 충전 ─────────────
@@ -299,7 +325,26 @@ export class GameState {
     if (p.contracts.active?.cartId) return '호송 중에는 바꿀 수 없습니다';
     return true;
   }
+  /** 전직: Lv ${ADVANCE_LEVEL} 이상, 안전 거점, 비전투, 자기 계열의 플레이 가능한 심화 직업 */
+  advance(p, classId) {
+    if (p.advanced) return '이미 전직했습니다';
+    if (p.level < ADVANCE_LEVEL) return `Lv ${ADVANCE_LEVEL}부터 전직할 수 있습니다`;
+    const ok = this.canChangeClass(p);
+    if (ok !== true) return ok;
+    const adv = ARCHETYPES[p.archetype]?.advances.find((a) => a.id === classId);
+    if (!adv) return '이 계열의 심화 직업이 아닙니다';
+    if (!adv.playable || !CLASSES[classId]) return `「${adv.name}」은(는) 아직 준비 중입니다`;
+    setClass(p, classId);
+    p.advanced = true;
+    this.bus.emit('classChanged', { id: p.id, classId, advanced: true });
+    this.bus.emit('advanced', { classId });
+    this.log(`전직: 「${CLASSES[classId].name}」 — 새 기술이 열렸습니다.`, 'level');
+    return true;
+  }
+
   changeClass(p, classId) {
+    if (!p.advanced) return '전직한 뒤에 다른 전투 방식을 배울 수 있습니다';
+    if (CLASSES[classId]?.novice) return '견습 직업으로는 돌아갈 수 없습니다';
     const ok = this.canChangeClass(p);
     if (ok !== true) return ok;
     if (!CLASSES[classId] || classId === p.classId) return '바꿀 수 없는 직업입니다';
@@ -332,7 +377,7 @@ export class GameState {
     this.publicState.update(dt);
     this.life.update(dt);
     const pl = this.player();
-    if (pl) { this.hidden.update(pl, dt); this.explore.update(pl, dt); }
+    if (pl) { this.hidden.update(pl, dt); this.explore.update(pl, dt); this.checkAnchors(pl); }
     for (let i = this.respawnQueue.length - 1; i >= 0; i--) {
       const r = this.respawnQueue[i];
       if (r.at <= this.time) { this.respawnQueue.splice(i, 1); this.spawnMonster(r.spawnIndex); }
@@ -417,9 +462,10 @@ export class GameState {
     p.channel = null;
     const e = this.get(c.targetId);
     this.bus.emit('channelEnd', { id: p.id, kind: c.kind });
-    if (!e && c.kind !== 'recall') return;
+    if (!e && c.kind !== 'recall' && c.kind !== 'travel') return;
     if (c.kind === 'gather') { this.giveItem(p, e.data.item, 1 + (this.rng() < 0.4 ? 1 : 0), e.pos); e.readyAt = this.time + 20; }
     if (c.kind === 'craft') this.contracts.craft(p, 'brace');
+    if (c.kind === 'travel') { const a = HARVEN.anchors.find((x) => x.id === c.anchor); if (a) { p.pos.x = a.x + 2; p.pos.z = a.z + 2; p.move.target = null; this.bus.emit('recall', { anchor: a.id }); this.log(`실을 따라 「${a.name}」(으)로 이동했습니다.`, 'system'); } return; }
     if (c.kind === 'recall') { p.pos.x = HARVEN.playerSpawn.x; p.pos.z = HARVEN.playerSpawn.z; p.move.target = null; this.bus.emit('recall', {}); this.log('실을 따라 교역 거점으로 돌아왔습니다.', 'system'); return; }
     if (c.kind === 'help') return this.helpProgress(p, e);
     if (c.kind === 'investigate') {
@@ -488,6 +534,13 @@ export class GameState {
         const dx = e.pos.x - n.pos.x, dz = e.pos.z - n.pos.z, d = Math.hypot(dx, dz), min = r + n.radius;
         if (d < min && d > 1e-4) { e.pos.x = n.pos.x + (dx / d) * min; e.pos.z = n.pos.z + (dz / d) * min; }
       }
+    }
+    // 성벽: 문 사이로만 드나든다
+    const W = HARVEN.walls, wr = Math.hypot(e.pos.x, e.pos.z), band = W.thick / 2 + r;
+    if (Math.abs(wr - W.r) < band) {
+      const ang = Math.atan2(e.pos.z, e.pos.x);
+      const inGate = W.gates.some((g) => Math.abs(Math.atan2(Math.sin(ang - g.a), Math.cos(ang - g.a))) < g.w / 2);
+      if (!inGate) { const target = wr < W.r ? W.r - band : W.r + band; e.pos.x *= target / wr; e.pos.z *= target / wr; }
     }
     const br = this.zone.boundsRadius, dc = Math.hypot(e.pos.x, e.pos.z);
     if (dc > br) { e.pos.x *= br / dc; e.pos.z *= br / dc; }
@@ -579,7 +632,7 @@ export class GameState {
     return {
       version: SAVE_VERSION,
       character: {
-        name: p.name, origin: p.origin, classId: p.classId, level: p.level, xp: p.xp, hp: Math.round(p.hp), gold: p.gold,
+        name: p.name, origin: p.origin, classId: p.classId, archetype: p.archetype, advanced: p.advanced, level: p.level, xp: p.xp, hp: Math.round(p.hp), gold: p.gold,
         pos: { x: +p.pos.x.toFixed(2), z: +p.pos.z.toFixed(2) }, inventory: { ...p.inventory }, affiliation: p.affiliation, equipment: { ...p.equipment },
       },
       personal: {
@@ -587,6 +640,7 @@ export class GameState {
         contracts: { done: { ...p.contracts.done } }, // 진행 중 계약은 저장하지 않음 (다음 접속에 처음부터, 벌칙 없음)
         contribs: { ...p.contribs },
         buyback: (p.buyback || []).slice(0, 8),
+        anchors: [...p.anchors],
         records: { clues: [...(p.records.clues || [])], log: p.records.log.slice(-30), letters: p.records.letters.slice(-20), pois: [...p.records.pois] },
         hidden: structuredClone(p.hidden), cosmetics: [...p.cosmetics], title: p.title, waypoint: p.waypoint, explored: this.explore.serialize(),
         lastSeen: this.snapshot(),

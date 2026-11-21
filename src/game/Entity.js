@@ -30,6 +30,8 @@ export function createPlayer(id, { name, origin, classId, character }) {
   e.inventory = { ...(character?.inventory || {}) };
   e.affiliation = character?.affiliation ?? null; // null | 'league' | 'independent'
   e.equipment = { weapon: null, armor: null, accessory: null, ...(character?.equipment || {}) };
+  e.archetype = character?.archetype || null;
+  e.advanced = character?.advanced ?? !CLASSES[classId]?.novice;
   e.radius = 0.45;
   e.move = { target: null, dir: { x: 0, z: 0 } };
   e.targetId = null;
@@ -50,6 +52,7 @@ export function setClass(e, classId) {
   e.classId = classId;
   e.modelId = cls.modelId;
   e.skills = { ...cls.skills };
+  e.advanced = !cls.novice;
   // 이 직업이 쓸 수 없는 장비는 소지품으로 돌려놓는다
   if (e.equipment) for (const [slot, id] of Object.entries(e.equipment)) {
     const it = id && ITEMS[id];

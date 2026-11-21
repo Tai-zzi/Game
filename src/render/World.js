@@ -1,7 +1,11 @@
 import * as THREE from 'three';
 import { HARVEN, heightAt, riverX } from '../data/zones.js';
 import { makeRng, smoothstep } from '../core/math.js';
-import { applySplat, addWind, makeWaterMaterial } from './shaders.js';
+import { Terrain } from './Terrain.js';
+import { Nature } from './Nature.js';
+import { Water } from './Water.js';
+import { Castle } from './Castle.js';
+import { pbr, boxUV, cylUV } from './Textures.js';
 
 /**
  * 하르벤 계곡의 시각 요소 전부. 로직과 공유하는 것은 zones.js 의 데이터/높이 함수뿐.
@@ -10,186 +14,76 @@ export class World {
   constructor(scene) {
     this.scene = scene;
     this.rng = makeRng(1903);
-    this.animated = []; // (t, dt) => void
+    this.animated = [];
     this.group = new THREE.Group();
     scene.add(this.group);
-
-    this.buildTerrain();
-    this.buildWater();
-    this.buildVillage();
+    // 실사풍 넓은 계곡: 조각 지형(스트리밍) · 자연 · 물 · 성채 마을
+    this.terrainSys = new Terrain(scene);
+    this.nature = new Nature(scene, this.terrainSys);
+    this.water = new Water(scene);
+    this.castle = new Castle(scene);
+    this.terrain = null; // 클릭 지점은 높이 함수로 계산 (Input)
     this.buildLoom();
     this.buildWaterWheel();
-    this.buildFences();
-    this.buildTrees();
-    this.buildGrass();
-    this.buildProps();
     this.buildLooseThreads();
     this.buildBridge();
     this.buildDepot();
+    this.buildSignposts();
+    this.buildAnchors();
+    this.focus = new THREE.Vector3();
   }
 
-  update(t, dt) { if (this.windTime) this.windTime.value = t; for (const f of this.animated) f(t, dt); }
-
-  // ---------------- 지형 ----------------
-  buildTerrain() {
-    const S = HARVEN.size, seg = 200;
-    const geo = new THREE.PlaneGeometry(S, S, seg, seg);
-    geo.rotateX(-Math.PI / 2);
-    const pos = geo.attributes.position;
-    const colors = new Float32Array(pos.count * 3);
-    const splat = new Float32Array(pos.count * 3); // (풀, 흙, 모래) 가중치
-    const c = new THREE.Color();
-    const grassA = new THREE.Color('#79a847'), grassB = new THREE.Color('#b0c45c'), hill = new THREE.Color('#9caf62');
-    const sand = new THREE.Color('#d9c38e'), dirt = new THREE.Color('#c49a63'), ash = new THREE.Color('#8e8f86');
-    const { hollow } = HARVEN;
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i), z = pos.getZ(i);
-      const h = heightAt(x, z);
-      pos.setY(i, h);
-      const n = 0.5 + 0.5 * Math.sin(x * 0.21 + Math.sin(z * 0.17) * 2) * Math.cos(z * 0.13);
-      c.copy(grassA).lerp(grassB, n * 0.7);
-      c.lerp(hill, smoothstep(2, 9, h) * 0.6);
-      // 마을 광장/길
-      const vr = Math.hypot(x, z);
-      const road = Math.min(Math.abs(z - 3 - Math.sin(x * 0.08) * 2), 99);
-      const roadMask = (1 - smoothstep(1.6, 3.2, road)) * (x > -20 && x < 40 ? 1 : 0);
-      c.lerp(dirt, Math.max(1 - smoothstep(7, 11, vr), roadMask * 0.85));
-      // 강변 모래
-      const rd = Math.abs(x - riverX(z));
-      c.lerp(sand, 1 - smoothstep(5, 9, rd));
-      // 잿빛 숲: 색이 빠져나간다
-      const hd = Math.hypot(x - hollow.x, z - hollow.z);
-      c.lerp(ash, (1 - smoothstep(hollow.radius * 0.4, hollow.radius, hd)) * 0.75);
-      colors.set([c.r, c.g, c.b], i * 3);
-      const wd = Math.max(1 - smoothstep(7, 11, vr), roadMask * 0.85), ws = 1 - smoothstep(5, 9, rd);
-      const wg = Math.max(0, 1 - wd - ws), sum = wg + wd + ws || 1;
-      splat.set([wg / sum, wd / sum, ws / sum], i * 3);
-    }
-    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    geo.setAttribute('aSplat', new THREE.BufferAttribute(splat, 3));
-    geo.computeVertexNormals();
-    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.96, metalness: 0 });
-    applySplat(mat);
-    this.terrain = new THREE.Mesh(geo, mat);
-    this.terrain.receiveShadow = true;
-    this.terrain.name = 'terrain';
-    this.group.add(this.terrain);
+  /** 매 프레임: 스트리밍(플레이어 주변 청크) · 바람 · 물 · 밤 불빛 */
+  update(t, dt, focus = null, night = 0) {
+    if (focus) this.focus.copy(focus);
+    this.terrainSys.update(this.focus, 2);
+    this.nature.updateGrass(this.focus, this.grassScale ?? 1);
+    this.nature.update(t);
+    this.water.update(t, dt);
+    this.castle.setNight(night);
+    for (const f of this.animated) f(t, dt);
   }
 
-  // ---------------- 강 ----------------
-  buildWater() {
-    const verts = [], uvs = [], idx = [];
-    const y = HARVEN.waterLevel, half = HARVEN.size / 2;
-    let row = 0;
-    for (let z = -half; z <= half; z += 2, row++) {
-      const cx = riverX(z);
-      verts.push(cx - 8, y, z, cx + 8, y, z);
-      uvs.push(0, z / 12, 1, z / 12);
-      if (row > 0) { const a = (row - 1) * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
-    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-    geo.setIndex(idx);
-    geo.computeVertexNormals();
-    const mat = makeWaterMaterial();
-    const water = new THREE.Mesh(geo, mat);
-    this.group.add(water);
-    this.animated.push((t) => { mat.uniforms.uTime.value = t; });
-
-    // 상류 여울 징검돌 (다리 상태와 무관하게 늘 건널 수 있음)
-    const stoneMat = new THREE.MeshStandardMaterial({ color: '#a8a294', roughness: 0.9 });
-    const stoneGeo = new THREE.CylinderGeometry(0.7, 0.85, 0.5, 7);
-    const fz = HARVEN.ford.z;
-    for (let i = -3; i <= 3; i++) {
-      const z = fz + Math.sin(i) * 0.6;
-      const s = new THREE.Mesh(stoneGeo, stoneMat);
-      s.position.set(riverX(z) + i * 1.9, HARVEN.waterLevel + 0.05, z);
-      s.rotation.y = i;
-      s.castShadow = s.receiveShadow = true;
-      this.group.add(s);
-    }
-  }
-
-  // ---------------- 마을 ----------------
-  buildVillage() {
-    const wall = new THREE.MeshStandardMaterial({ color: '#efdfbf', roughness: 0.9 });
-    const timber = new THREE.MeshStandardMaterial({ color: '#6b4428', roughness: 0.85 });
-    const windowMat = new THREE.MeshStandardMaterial({ color: '#ffcf7a', emissive: '#ffb24a', emissiveIntensity: 1.2 });
-    const stone = new THREE.MeshStandardMaterial({ color: '#9b9285', roughness: 0.95 });
-    const houses = HARVEN.houses;
-    for (const h of houses) {
-      if (h.shop) { this.buildShop(h); continue; }
-      const g = new THREE.Group();
-      const y = heightAt(h.x, h.z);
-      g.position.set(h.x, y, h.z);
-      const sink = 2.5;
-      const body = new THREE.Mesh(new THREE.BoxGeometry(h.w, h.h + sink, h.d), wall);
-      body.position.y = (h.h - sink) / 2;
-      g.add(body);
-      // 목조 기둥
-      for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
-        const b = new THREE.Mesh(new THREE.BoxGeometry(0.28, h.h + sink, 0.28), timber);
-        b.position.set(sx * (h.w / 2), (h.h - sink) / 2, sz * (h.d / 2));
-        g.add(b);
+  /** 길 표지판 (갈림길·지역 경계) */
+  buildSignposts() {
+    const T = pbr('timber'), P = pbr('planks');
+    for (const road of HARVEN.roads) {
+      for (const [i, [x, z]] of road.entries()) {
+        if (i === 0 || Math.hypot(x, z) < 45) continue;
+        const nx = road[Math.min(i + 1, road.length - 1)], dx = nx[0] - x, dz = nx[1] - z;
+        const sx = x + 3, sz = z + 3, y = heightAt(sx, sz);
+        const post = new THREE.Mesh(cylUV(new THREE.CylinderGeometry(0.08, 0.1, 2.4, 8), 0.1, 2.4), T); post.position.set(sx, y + 1.2, sz);
+        const board = new THREE.Mesh(boxUV(new THREE.BoxGeometry(1.1, 0.3, 0.06), 1.1, 0.3, 0.06), P); board.position.set(sx, y + 2.0, sz); board.rotation.y = Math.atan2(dx, dz) - Math.PI / 2;
+        post.castShadow = board.castShadow = true;
+        this.group.add(post, board);
       }
-      const beam = new THREE.Mesh(new THREE.BoxGeometry(h.w + 0.2, 0.25, h.d + 0.2), timber);
-      beam.position.y = h.h * 0.55; g.add(beam);
-      // 지붕 (사각뿔)
-      const roofH = Math.max(h.w, h.d) * 0.42;
-      const roof = new THREE.Mesh(new THREE.ConeGeometry(Math.SQRT1_2 * 1.0, 1, 4, 1), new THREE.MeshStandardMaterial({ color: h.roof, roughness: 0.8, flatShading: true }));
-      roof.rotation.y = Math.PI / 4;
-      roof.scale.set(h.w + 1.2, roofH, h.d + 1.2);
-      roof.position.y = h.h + roofH / 2;
-      g.add(roof);
-      // 문과 창 (남쪽 = +z, 카메라 쪽)
-      const door = new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.8, 0.12), timber);
-      door.position.set(-h.w * 0.2, 0.9, h.d / 2 + 0.05); g.add(door);
-      for (const wx of [h.w * 0.22]) {
-        const win = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.8, 0.1), windowMat);
-        win.position.set(wx, 1.6, h.d / 2 + 0.06); g.add(win);
-      }
-      const win2 = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.8, 0.9), windowMat);
-      win2.position.set(h.w / 2 + 0.06, 1.6, 0); g.add(win2);
-      const chim = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.6, 0.7), stone);
-      chim.position.set(h.w * 0.25, h.h + roofH * 0.6, -h.d * 0.2); g.add(chim);
-      g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    }
+  }
+
+  /** 실 매듭돌: 선 돌 + 빛나는 매듭 (빠른 이동 지점) */
+  buildAnchors() {
+    this.anchorObjs = {};
+    const rock = pbr('rock');
+    const glow = new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffd27a').multiplyScalar(2.2), transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false });
+    for (const a of HARVEN.anchors) {
+      const y = heightAt(a.x, a.z);
+      const g = new THREE.Group(); g.position.set(a.x, y, a.z);
+      const stone = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.7, 2.6, 7), rock); stone.position.y = 1.2; stone.rotation.y = a.x; stone.castShadow = true;
+      const knot = new THREE.Mesh(new THREE.TorusKnotGeometry(0.32, 0.05, 64, 6, 2, 3), glow.clone()); knot.position.y = 3.0;
+      g.add(stone, knot);
       this.group.add(g);
-      (this.houseGroups ||= []).push({ g, h });
+      this.anchorObjs[a.id] = knot;
+      this.animated.push((t) => { knot.rotation.y = t * 0.8; knot.position.y = 3.0 + Math.sin(t * 1.5 + a.x) * 0.12; });
     }
   }
-
-  // ---------------- 잡화점 (앞이 트인 가게: 뒤 창고 + 차양 + 계산대 + 선반 + 간판) ----------------
-  buildShop(h) {
-    const g = new THREE.Group();
-    const y = heightAt(h.x, h.z + 2);
-    g.position.set(h.x, y, h.z);
-    const stone = new THREE.MeshStandardMaterial({ color: '#9b9285', roughness: 0.95 });
-    const wood = new THREE.MeshStandardMaterial({ color: '#6b4428', roughness: 0.85 });
-    const cloth = new THREE.MeshStandardMaterial({ color: '#8a3a2a', roughness: 0.9, side: THREE.DoubleSide });
-    const back = new THREE.Mesh(new THREE.BoxGeometry(h.w, h.h + 2, h.d), stone); back.position.y = h.h / 2 - 1; g.add(back);
-    const roof = new THREE.Mesh(new THREE.BoxGeometry(h.w + 0.6, 0.25, h.d + 0.6), new THREE.MeshStandardMaterial({ color: h.roof })); roof.position.y = h.h + 0.1; g.add(roof);
-    const D = 3.2; // 차양 깊이
-    for (const sx of [-1, 1]) { const post = new THREE.Mesh(new THREE.BoxGeometry(0.22, h.h - 0.4, 0.22), wood); post.position.set(sx * (h.w / 2 - 0.2), (h.h - 0.4) / 2, h.d / 2 + D); g.add(post); }
-    const awn = new THREE.Mesh(new THREE.PlaneGeometry(h.w + 0.4, D + 0.6), cloth); awn.rotation.x = -Math.PI / 2 + 0.25; awn.position.set(0, h.h - 0.35, h.d / 2 + D / 2); g.add(awn);
-    for (let i = 0; i < 7; i++) { const st = new THREE.Mesh(new THREE.PlaneGeometry((h.w + 0.4) / 14, D + 0.62), new THREE.MeshStandardMaterial({ color: '#e8dcc0', side: THREE.DoubleSide })); st.rotation.copy(awn.rotation); st.position.set(-h.w / 2 + (i + 0.5) * ((h.w + 0.4) / 7), h.h - 0.34, h.d / 2 + D / 2); g.add(st); }
-    const counter = new THREE.Mesh(new THREE.BoxGeometry(h.w - 1, 1.0, 0.7), wood); counter.position.set(0, 0.5, h.d / 2 + 0.9); g.add(counter);
-    const goods = ['#e86a5a', '#d9a35a', '#9fe0a0', '#e8c87a', '#9aa3ad', '#f0e0b0'];
-    for (let i = 0; i < 12; i++) { const it = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.1, 0.24, 8), new THREE.MeshStandardMaterial({ color: goods[i % goods.length], emissive: goods[i % goods.length], emissiveIntensity: 0.15 })); it.position.set(-h.w / 2 + 0.9 + (i % 6) * 0.9, 1.12, h.d / 2 + 0.9 + (i < 6 ? -0.15 : 0.15)); g.add(it); }
-    for (let k = 0; k < 2; k++) { const shelf = new THREE.Mesh(new THREE.BoxGeometry(h.w - 1, 0.08, 0.5), wood); shelf.position.set(0, 1.2 + k * 0.7, h.d / 2 + 0.3); g.add(shelf); }
-    const sign = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.6, 0.08), new THREE.MeshStandardMaterial({ color: '#e8c87a', emissive: '#6a4a1a', emissiveIntensity: 0.3 })); sign.position.set(-h.w / 2 - 0.1, h.h - 0.9, h.d / 2 + D + 0.2); sign.rotation.y = Math.PI / 2; g.add(sign);
-    const lamp = new THREE.PointLight('#ffc070', 3, 8, 1.6); lamp.position.set(0, h.h - 0.8, h.d / 2 + 1.5); g.add(lamp);
-    g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-    this.group.add(g);
-    (this.houseGroups ||= []).push({ g, h });
-  }
+  setAnchorsFound(list) { for (const [id, k] of Object.entries(this.anchorObjs)) k.material.opacity = list.includes(id) ? 0.95 : 0.25; }
 
   // ---------------- 공동 베틀 ----------------
   buildLoom() {
     const L = HARVEN.loom;
     const g = new THREE.Group();
     g.position.set(L.x, heightAt(L.x, L.z), L.z);
-    const wood = new THREE.MeshStandardMaterial({ color: '#7c4f2a', roughness: 0.8 });
+    const wood = pbr('timber');
     const W = L.w, H = 3.4;
     const post = new THREE.BoxGeometry(0.3, H, 0.3);
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
@@ -238,7 +132,7 @@ export class World {
   buildWaterWheel() {
     const z = HARVEN.wheelZ, x = riverX(z) - 3.2;
     const wheel = new THREE.Group();
-    const wood = new THREE.MeshStandardMaterial({ color: '#6e4526', roughness: 0.85 });
+    const wood = pbr('timber');
     const R = 2.7;
     for (const sx of [-0.55, 0.55]) {
       const rim = new THREE.Mesh(new THREE.TorusGeometry(R, 0.12, 6, 28), wood);
@@ -263,197 +157,12 @@ export class World {
     this.animated.push((t, dt) => { wheel.rotation.x -= dt * 0.7; });
   }
 
-  // ---------------- 울타리 (인스턴싱) ----------------
-  buildFences() {
-    const lines = [];
-    // 동쪽 목초지 울타리 (원형, 마을 쪽으로 출입구)
-    const m = HARVEN.spawns[0];
-    const ring = [];
-    for (let i = 0; i <= 36; i++) {
-      const a = (i / 36) * Math.PI * 2;
-      if (a > 3.6 && a < 4.2) { if (ring.length) lines.push(ring.splice(0)); continue; }
-      ring.push({ x: m.x + Math.cos(a) * (m.radius + 4), z: m.z + Math.sin(a) * (m.radius + 4) });
-    }
-    if (ring.length) lines.push(ring);
-    // 마을 길 울타리
-    lines.push([{ x: 20, z: 6.5 }, { x: 26, z: 7.2 }, { x: 32, z: 7.8 }, { x: 37, z: 8.2 }]);
-    lines.push([{ x: 20, z: -0.5 }, { x: 26, z: -0.4 }, { x: 32, z: 0.2 }]);
-
-    const posts = [], rails = [];
-    for (const line of lines) {
-      for (let i = 0; i < line.length; i++) {
-        const p = line[i];
-        if (Math.abs(p.x - riverX(p.z)) < 9) continue;
-        posts.push(p);
-        const q = line[i + 1];
-        if (q && Math.abs(q.x - riverX(q.z)) >= 9) rails.push([p, q]);
-      }
-    }
-    const wood = new THREE.MeshStandardMaterial({ color: '#8a6440', roughness: 0.9 });
-    const postMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(0.22, 1.3, 0.22), wood, posts.length);
-    const railMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(0.1, 0.12, 1), wood, rails.length * 2);
-    const d = new THREE.Object3D();
-    posts.forEach((p, i) => { d.position.set(p.x, heightAt(p.x, p.z) + 0.55, p.z); d.rotation.set(0, 0, 0); d.scale.set(1, 1, 1); d.updateMatrix(); postMesh.setMatrixAt(i, d.matrix); });
-    let k = 0;
-    for (const [a, b] of rails) {
-      const len = Math.hypot(b.x - a.x, b.z - a.z);
-      for (const hy of [0.45, 0.9]) {
-        const ya = heightAt(a.x, a.z) + hy, yb = heightAt(b.x, b.z) + hy;
-        d.position.set((a.x + b.x) / 2, (ya + yb) / 2, (a.z + b.z) / 2);
-        d.scale.set(1, 1, len);
-        d.lookAt(b.x, yb, b.z);
-        d.updateMatrix(); railMesh.setMatrixAt(k++, d.matrix);
-      }
-    }
-    postMesh.castShadow = railMesh.castShadow = true;
-    this.group.add(postMesh, railMesh);
-  }
-
-  /** 나무/풀 배치 가능 여부 */
-  freeSpot(x, z, clearVillage = 24) {
-    if (Math.hypot(x, z) < clearVillage) return false;
-    if (Math.abs(x - riverX(z)) < 8) return false;
-    for (const h of HARVEN.houses) if (Math.abs(x - h.x) < h.w / 2 + 2 && Math.abs(z - h.z) < h.d / 2 + 2) return false;
-    if (Math.abs(z - 3) < 4 && x > -20 && x < 40) return false;
-    for (const s of HARVEN.spawns) if (Math.hypot(x - s.x, z - s.z) < s.radius * 0.8) return false;
-    for (const p of [...HARVEN.cartRoute, ...HARVEN.nodes, ...HARVEN.clues, HARVEN.depot]) if (Math.hypot(x - p.x, z - p.z) < 6) return false;
-    return Math.hypot(x, z) < HARVEN.size / 2 - 4;
-  }
-
-  // ---------------- 나무 (인스턴싱) ----------------
-  buildTrees() {
-    const rng = this.rng, H = HARVEN.hollow;
-    const spots = [];
-    for (let tries = 0; tries < 3000 && spots.length < 340; tries++) {
-      const x = (rng() - 0.5) * (HARVEN.size - 10), z = (rng() - 0.5) * (HARVEN.size - 10);
-      if (!this.freeSpot(x, z)) continue;
-      const inHollow = Math.hypot(x - H.x, z - H.z) < H.radius;
-      // 외곽과 잿빛 숲은 빽빽하게, 들판은 듬성듬성
-      const density = inHollow ? 0.8 : 0.25 + smoothstep(50, 100, Math.hypot(x, z)) * 0.7;
-      if (rng() > density) continue;
-      spots.push({ x, z, s: 0.8 + rng() * 0.7, hollow: inHollow, r: rng() * 6.28 });
-    }
-    const n = spots.length;
-    const trunk = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.18, 0.3, 2.2, 6).translate(0, 1.1, 0), new THREE.MeshStandardMaterial({ color: '#6b4a2f', roughness: 1 }), n);
-    const leafGeo = new THREE.IcosahedronGeometry(1.5, 0);
-    const leafMat = new THREE.MeshStandardMaterial({ roughness: 0.9, flatShading: true });
-    this.windTime = this.windTime || { value: 0 };
-    addWind(leafMat, this.windTime, 0.06);
-    const leaves = new THREE.InstancedMesh(leafGeo, leafMat, n * 2);
-    const d = new THREE.Object3D(), c = new THREE.Color();
-    const greens = ['#5f8f3a', '#4f7d34', '#7aa046', '#8fa84c', '#c9a14a'];
-    spots.forEach((p, i) => {
-      const y = heightAt(p.x, p.z);
-      d.position.set(p.x, y - 0.1, p.z); d.rotation.set(0, p.r, 0); d.scale.setScalar(p.s); d.updateMatrix();
-      trunk.setMatrixAt(i, d.matrix);
-      for (let j = 0; j < 2; j++) {
-        d.position.set(p.x + (j ? 0.3 : 0), y + (2.3 + j * 1.1) * p.s, p.z + (j ? -0.2 : 0));
-        d.scale.setScalar(p.s * (j ? 0.75 : 1.05)); d.rotation.set(p.r, p.r * 2 + j, 0); d.updateMatrix();
-        leaves.setMatrixAt(i * 2 + j, d.matrix);
-        if (p.hollow) c.set(j ? '#9a9a90' : '#7f8079').offsetHSL(0, 0, (this.rng() - 0.5) * 0.06);
-        else c.set(greens[Math.floor(this.rng() * greens.length)]);
-        leaves.setColorAt(i * 2 + j, c);
-      }
-    });
-    trunk.castShadow = leaves.castShadow = true;
-    leaves.receiveShadow = true;
-    this.group.add(trunk, leaves);
-  }
-
-  // ---------------- 풀 (인스턴싱 + 바람 셰이더) ----------------
-  buildGrass() {
-    const blade = new THREE.BufferGeometry();
-    const v = [];
-    for (let k = 0; k < 3; k++) {
-      const a = (k / 3) * Math.PI;
-      const cx = Math.cos(a) * 0.25, cz = Math.sin(a) * 0.25;
-      v.push(-cx, 0, -cz, cx, 0, cz, 0, 0.7, 0);
-    }
-    blade.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
-    blade.computeVertexNormals();
-    const mat = new THREE.MeshLambertMaterial({ side: THREE.DoubleSide });
-    const uTime = { value: 0 };
-    mat.onBeforeCompile = (sh) => {
-      sh.uniforms.uTime = uTime;
-      sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace('#include <begin_vertex>',
-        `#include <begin_vertex>
-        float ph = instanceMatrix[3].x * 0.35 + instanceMatrix[3].z * 0.27;
-        transformed.x += sin(uTime * 1.8 + ph) * 0.18 * position.y;
-        transformed.z += cos(uTime * 1.3 + ph) * 0.1 * position.y;`);
-    };
-    const count = 9000;
-    const mesh = new THREE.InstancedMesh(blade, mat, count);
-    const d = new THREE.Object3D(), c = new THREE.Color(), H = HARVEN.hollow;
-    let i = 0;
-    for (let tries = 0; tries < count * 4 && i < count; tries++) {
-      const r = Math.sqrt(this.rng()) * 105, a = this.rng() * Math.PI * 2;
-      const x = Math.cos(a) * r, z = Math.sin(a) * r;
-      if (Math.hypot(x, z) < 10 || Math.abs(x - riverX(z)) < 6) continue;
-      const y = heightAt(x, z);
-      d.position.set(x, y, z); d.rotation.set(0, this.rng() * 6.28, 0); d.scale.setScalar(0.6 + this.rng() * 0.9); d.updateMatrix();
-      mesh.setMatrixAt(i, d.matrix);
-      const hollow = Math.hypot(x - H.x, z - H.z) < H.radius * 0.8;
-      c.setHSL(hollow ? 0.15 : 0.2 + this.rng() * 0.08, hollow ? 0.08 : 0.45, 0.32 + this.rng() * 0.15);
-      mesh.setColorAt(i, c);
-      i++;
-    }
-    mesh.count = i;
-    mesh.receiveShadow = true;
-    this.group.add(mesh);
-    this.animated.push((t) => { uTime.value = t; });
-
-    // 염료 꽃
-    const fl = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(0.16, 0), new THREE.MeshLambertMaterial(), 500);
-    const dyes = ['#e86a5a', '#f2c14e', '#f6f0e0', '#9d7cc9', '#5aa0d8'];
-    let fi = 0;
-    for (let tries = 0; tries < 4000 && fi < 500; tries++) {
-      const x = (this.rng() - 0.5) * 200, z = (this.rng() - 0.5) * 200;
-      if (Math.hypot(x, z) < 12 || Math.abs(x - riverX(z)) < 6 || Math.hypot(x - H.x, z - H.z) < H.radius) continue;
-      d.position.set(x, heightAt(x, z) + 0.35, z); d.scale.setScalar(0.8 + this.rng()); d.updateMatrix();
-      fl.setMatrixAt(fi, d.matrix); fl.setColorAt(fi, c.set(dyes[fi % dyes.length])); fi++;
-    }
-    fl.count = fi;
-    this.group.add(fl);
-  }
-
-  // ---------------- 소품 ----------------
-  buildProps() {
-    // 털뭉치 더미, 등불, 공백의 구멍
-    const baleMat = new THREE.MeshStandardMaterial({ color: '#efe6d2', roughness: 1 });
-    const bales = [[8, 5], [9.2, 5.6], [-8, -2], [24, 28], [26, 27]];
-    for (const [x, z] of bales) {
-      const b = new THREE.Mesh(new THREE.SphereGeometry(0.7, 10, 8), baleMat);
-      b.scale.y = 0.8; b.position.set(x, heightAt(x, z) + 0.5, z); b.castShadow = true; this.group.add(b);
-    }
-    const lampPost = new THREE.MeshStandardMaterial({ color: '#4a3424' });
-    const lampGlow = new THREE.MeshStandardMaterial({ color: '#ffd38a', emissive: '#ffae42', emissiveIntensity: 2 });
-    for (const [x, z] of [[-6, 2], [7, 2], [-6, -10], [7, -8], [18, 4], [-1, 12]]) {
-      const y = heightAt(x, z);
-      const p = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 2.4, 6), lampPost); p.position.set(x, y + 1.2, z); p.castShadow = true;
-      const l = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8), lampGlow); l.position.set(x, y + 2.5, z);
-      this.group.add(p, l);
-    }
-    const H = HARVEN.hollow;
-    const voidMat = new THREE.MeshBasicMaterial({ color: '#141418', transparent: true, opacity: 0.85 });
-    const rimMat = new THREE.MeshBasicMaterial({ color: '#b9c6ff', transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
-    const rims = [];
-    for (let i = 0; i < 5; i++) {
-      const a = i * 1.7, r = 6 + i * 4;
-      const x = H.x + Math.cos(a) * r, z = H.z + Math.sin(a) * r, s = 0.8 + (i % 3) * 0.5;
-      const y = heightAt(x, z) + 0.04;
-      const hole = new THREE.Mesh(new THREE.CircleGeometry(s, 18), voidMat); hole.rotation.x = -Math.PI / 2; hole.position.set(x, y, z);
-      const rim = new THREE.Mesh(new THREE.RingGeometry(s, s + 0.15, 24), rimMat); rim.rotation.x = -Math.PI / 2; rim.position.set(x, y + 0.01, z);
-      this.group.add(hole, rim); rims.push(rim);
-    }
-    this.animated.push((t) => { rimMat.opacity = 0.25 + 0.2 * Math.sin(t * 1.3); });
-  }
-
   // ---------------- 끊어진 다리 (공공 결산에 따라 모습이 바뀐다) ----------------
   buildBridge() {
     const B = HARVEN.bridge, cx = riverX(B.z), half = 9, y = B.deckY;
-    const plankMat = new THREE.MeshStandardMaterial({ color: '#8a6440', roughness: 0.9 });
-    const darkMat = new THREE.MeshStandardMaterial({ color: '#5a3d26', roughness: 0.9 });
-    const stoneMat = new THREE.MeshStandardMaterial({ color: '#9b9285', roughness: 0.95 });
+    const plankMat = pbr('planks');
+    const darkMat = pbr('timber');
+    const stoneMat = pbr('castle_wall');
     const braceMat = new THREE.MeshStandardMaterial({ color: '#d9a35a', emissive: '#6a4a1a', emissiveIntensity: 0.3 });
     const groups = {};
     const make = (name) => { const g = new THREE.Group(); g.visible = false; this.group.add(g); groups[name] = g; return g; };
@@ -527,18 +236,6 @@ export class World {
       wheel.position.copy(this.wheelGroup.position); wheel.position.y = HARVEN.waterLevel - 0.6; wheel.rotation.y = Math.PI / 2;
       this.group.add(wheel); this.wheelGroup.visible = false;
     }
-    const house = await ai.load('prop_house');
-    if (house && this.houseGroups) {
-      const near = this.houseGroups.filter(({ h }) => !h.mill).sort((a, b) => Math.hypot(a.h.x, a.h.z) - Math.hypot(b.h.x, b.h.z)).slice(0, 3);
-      for (const { g, h } of near) {
-        const obj = await ai.instance('prop_house');
-        if (!obj) break;
-        const s = Math.min(h.w, h.d) / 4.2;
-        obj.scale.setScalar(s);
-        place(obj, h.x, h.z, Math.PI);
-        g.visible = false;
-      }
-    }
     const bridge = await ai.instance('prop_broken_bridge');
     if (bridge) {
       const B = HARVEN.bridge;
@@ -551,8 +248,8 @@ export class World {
   buildDepot() {
     const d = HARVEN.depot, x = d.x + 5, z = d.z - 3, y = heightAt(x, z);
     const g = new THREE.Group(); g.position.set(x, y, z);
-    const body = new THREE.Mesh(new THREE.BoxGeometry(6, 5, 5), new THREE.MeshStandardMaterial({ color: '#d9c7a0' })); body.position.y = 1.5;
-    const roof = new THREE.Mesh(new THREE.ConeGeometry(Math.SQRT1_2, 1, 4), new THREE.MeshStandardMaterial({ color: '#6a4a33', flatShading: true }));
+    const body = new THREE.Mesh(boxUV(new THREE.BoxGeometry(6, 5, 5), 6, 5, 5), pbr('castle_brick')); body.position.y = 1.5;
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(Math.SQRT1_2, 1, 4), pbr('roof_slate'));
     roof.rotation.y = Math.PI / 4; roof.scale.set(7, 2.2, 6); roof.position.y = 5.1;
     g.add(body, roof);
     for (let i = 0; i < 3; i++) { const c = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, 0.9), new THREE.MeshStandardMaterial({ color: '#8a6440' })); c.position.set(-3.8, 0.45 + (i === 2 ? 0.9 : 0), -1 + (i % 2) * 1.0); g.add(c); }

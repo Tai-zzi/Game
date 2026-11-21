@@ -4,9 +4,10 @@ import { NPCS } from '../data/npcs.js';
 import { BRIDGE_EVENT, CONTRACTS } from '../data/contracts.js';
 import { relSummary } from '../game/Relationships.js';
 import { EXPLORE } from '../game/Explore.js';
+import { mapGrid } from './MapGrid.js';
 
 const $ = (id) => document.getElementById(id);
-const PX = 4; // 배경: 1m = 4px
+const PX = 1; // 배경: 1m = 1px (넓은 계곡 1.6km)
 
 /**
  * 세계 지도 (M). 수놓은 천 지도 느낌. 탐험하지 않은 곳은 양피지 안개로 덮인다.
@@ -17,10 +18,10 @@ export class WorldMap {
     this.game = game; this.send = send;
     this.el = $('worldmap'); this.cv = $('worldmap-canvas'); this.ctx = this.cv.getContext('2d');
     this.open = false;
-    this.zoom = 3; this.cx = 0; this.cz = 0;
+    this.zoom = 1.6; this.cx = 0; this.cz = 0;
     this.bg = null; this.fog = null; this.fogVer = -1;
     let drag = null;
-    this.cv.addEventListener('wheel', (e) => { e.preventDefault(); this.zoom = Math.min(10, Math.max(1.2, this.zoom * (e.deltaY > 0 ? 0.88 : 1.14))); }, { passive: false });
+    this.cv.addEventListener('wheel', (e) => { e.preventDefault(); this.zoom = Math.min(10, Math.max(0.35, this.zoom * (e.deltaY > 0 ? 0.88 : 1.14))); }, { passive: false });
     this.cv.addEventListener('mousedown', (e) => { drag = { x: e.clientX, y: e.clientY, cx: this.cx, cz: this.cz, moved: false }; this.cv.style.cursor = 'grabbing'; });
     window.addEventListener('mousemove', (e) => {
       if (!drag) return;
@@ -33,6 +34,10 @@ export class WorldMap {
       if (!drag.moved && e.target === this.cv) {
         const r = this.cv.getBoundingClientRect();
         const x = this.cx + (e.clientX - r.left - r.width / 2) / this.zoom, z = this.cz + (e.clientY - r.top - r.height / 2) / this.zoom;
+        // 발견한 매듭돌을 누르면 빠른 이동
+        const pl = this.game.player();
+        const an = HARVEN.anchors.find((a) => pl.anchors.includes(a.id) && Math.hypot(a.x - x, a.z - z) < 14 / this.zoom + 3);
+        if (an) { this.send({ type: 'travel', id: an.id }); this.close(); drag = null; this.cv.style.cursor = 'grab'; return; }
         const wp = this.game.player().waypoint;
         if (wp && Math.hypot(wp.x - x, wp.z - z) < 6 / this.zoom * 4) this.send({ type: 'setWaypoint' });
         else this.send({ type: 'setWaypoint', x, z });
@@ -54,14 +59,18 @@ export class WorldMap {
     const S = HARVEN.size, W = S * PX;
     const c = document.createElement('canvas'); c.width = c.height = W;
     const g = c.getContext('2d');
+    const G = mapGrid();
     const img = g.createImageData(W / 2, W / 2);
     for (let j = 0; j < W / 2; j++) for (let i = 0; i < W / 2; i++) {
       const x = (i / (W / 2) - 0.5) * S, z = (j / (W / 2) - 0.5) * S;
-      const h = heightAt(x, z);
+      const h = G.at(x, z);
       const weave = ((i + j) % 4 < 2 ? 6 : 0) + ((i - j) % 6 === 0 ? -6 : 0); // 천의 결
       let r = 196 + h * 3 + weave, gg = 178 + h * 4 + weave, b = 132 + weave;
       if (Math.hypot(x - HARVEN.hollow.x, z - HARVEN.hollow.z) < HARVEN.hollow.radius) { r -= 30; gg -= 28; b -= 10; }
       if (h > 5) { r -= 18; gg -= 12; b -= 16; }
+      if (h > 30) { r -= 20; gg -= 16; b -= 8; }
+      if (h > 100) { r += 40; gg += 44; b += 60; }
+      if (Math.hypot(x - HARVEN.lake.x, z - HARVEN.lake.z) < HARVEN.lake.r * 0.95) { r = 110; gg = 150; b = 175; }
       const o = (j * (W / 2) + i) * 4;
       img.data[o] = r; img.data[o + 1] = gg; img.data[o + 2] = b; img.data[o + 3] = 255;
     }
@@ -71,10 +80,10 @@ export class WorldMap {
     const P = (x, z) => [(x + S / 2) * PX, (z + S / 2) * PX];
     // 등고선 실 (수놓은 선)
     g.strokeStyle = 'rgba(122,90,58,0.35)'; g.lineWidth = 1.5; g.setLineDash([4, 3]);
-    for (let lv = 2; lv < 14; lv += 3) {
-      for (let j = 0; j < S; j += 2) for (let i = 0; i < S; i += 2) {
+    for (let lv = 5; lv < 140; lv += 10) {
+      for (let j = 0; j < S; j += 4) for (let i = 0; i < S; i += 4) {
         const x = i - S / 2, z = j - S / 2;
-        const a = heightAt(x, z) >= lv, bb = heightAt(x + 2, z) >= lv;
+        const a = G.at(x, z) >= lv, bb = G.at(x + 4, z) >= lv;
         if (a !== bb) { const [px, pz] = P(x + 1, z); g.beginPath(); g.moveTo(px, pz - 3); g.lineTo(px, pz + 3); g.stroke(); }
       }
     }
@@ -83,7 +92,7 @@ export class WorldMap {
     for (let k = -2; k <= 2; k++) {
       g.strokeStyle = k === 0 ? '#4a7aa8' : 'rgba(90,140,190,0.7)'; g.lineWidth = k === 0 ? 5 : 2;
       g.beginPath();
-      for (let z = -S / 2; z <= S / 2; z += 2) { const [px, pz] = P(riverX(z) + k * 2.2, z); z === -S / 2 ? g.moveTo(px, pz) : g.lineTo(px, pz); }
+      for (let z = -720; z <= 720; z += 4) { const [px, pz] = P(riverX(z) + k * 2.2, z); z === -720 ? g.moveTo(px, pz) : g.lineTo(px, pz); }
       g.stroke();
     }
     // 길: 바느질 점선
@@ -92,6 +101,8 @@ export class WorldMap {
     for (let x = -20; x <= 60; x += 2) { const [px, pz] = P(x, 3 + Math.sin(x * 0.08) * 2); first ? g.moveTo(px, pz) : g.lineTo(px, pz); first = false; }
     g.stroke();
     g.beginPath(); HARVEN.cartRoute.forEach((w, i) => { const [px, pz] = P(w.x, w.z); i ? g.lineTo(px, pz) : g.moveTo(px, pz); }); g.stroke();
+    for (const road of HARVEN.roads) { g.beginPath(); road.forEach(([x, z], i) => { const [px, pz] = P(x, z); i ? g.lineTo(px, pz) : g.moveTo(px, pz); }); g.stroke(); }
+    g.setLineDash([]); g.strokeStyle = '#6a625a'; g.lineWidth = 3; g.beginPath(); { const [cx, cz] = P(0, 0); g.arc(cx, cz, HARVEN.walls.r * PX, 0, Math.PI * 2); } g.stroke();
     g.setLineDash([]);
     // 집: 덧댄 천 조각
     for (const h of HARVEN.houses) {
@@ -140,6 +151,10 @@ export class WorldMap {
       ctx.font = 'bold 12px "Gowun Batang", serif'; ctx.textAlign = 'center';
       ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(250,239,214,0.9)'; ctx.strokeText(text, sx, sy - 10); ctx.fillStyle = color; ctx.fillText(text, sx, sy - 10);
     };
+    // 지역 이름 (가 본 곳)
+    if (z < 2.5) for (const r of HARVEN.regions) if (r.id !== 'town' && explored(r.x, r.z)) { const [sx, sy] = toS(r.x, r.z); ctx.font = 'bold 18px "Gowun Batang", serif'; ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(90,50,30,0.7)'; ctx.fillText(r.name, sx, sy); }
+    // 실 매듭돌 (발견한 것만, 누르면 이동)
+    for (const a of HARVEN.anchors) if (p.anchors.includes(a.id)) label(a.x, a.z, a.name + ' (빠른 이동)', '#b8860b', '✦');
     // 장소
     label(0, 0, '하르벤 교역 거점', '#7a3b22', '⌂');
     for (const [k, icon] of [['stall', '⚖'], ['yard', '⚔'], ['clinic', '✚'], ['office', '✎']]) if (explored(PLACES[k].x, PLACES[k].z)) label(PLACES[k].x, PLACES[k].z, PLACES[k].name, '#5a3a22', icon);
@@ -195,7 +210,7 @@ export class WorldMap {
     const key = `${ratio}|${this.game.publicState.bridge.state}|${p.contracts.active?.id}`;
     if (this.legendKey === key) return;
     this.legendKey = key;
-    $('worldmap-legend').innerHTML = `<h3>하르벤 계곡</h3>탐험 ${ratio}% · ${this.game.life.clockText}<br>⌂ 거점 · ⚖ 상점 · ⚔ 훈련장 · ✚ 진료소 · ✎ 연맹<br>● 만난 사람(지금 위치) · ◆ 찾은 단서<br>☠ 위험 지역 · ▶ 계약 목표 · ▼ 목적지<br>다리 색: 빨강 끊어짐 · 주황 우회로 · 노랑 임시 · 초록 복구${p.contracts.active ? `<br>진행 중: 「${CONTRACTS[p.contracts.active.id].name}」` : ''}`;
+    $('worldmap-legend').innerHTML = `<h3>하르벤 계곡</h3>탐험 ${ratio}% · ${this.game.life.clockText}<br>⌂ 거점 · ⚖ 상점 · ⚔ 훈련장 · ✚ 진료소 · ✎ 연맹<br>✦ 실 매듭돌 (눌러서 빠른 이동)<br>● 만난 사람(지금 위치) · ◆ 찾은 단서<br>☠ 위험 지역 · ▶ 계약 목표 · ▼ 목적지<br>다리 색: 빨강 끊어짐 · 주황 우회로 · 노랑 임시 · 초록 복구${p.contracts.active ? `<br>진행 중: 「${CONTRACTS[p.contracts.active.id].name}」` : ''}`;
   }
 }
 

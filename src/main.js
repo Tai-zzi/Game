@@ -14,6 +14,7 @@ import { World } from './render/World.js';
 import { VFX } from './render/VFX.js';
 import { EntityViews } from './render/EntityViews.js';
 import { AiAssets } from './render/AiAssets.js';
+import { TexSettings } from './render/Textures.js';
 import { HUD } from './ui/HUD.js';
 import { Overlay } from './ui/Overlay.js';
 import { Minimap } from './ui/Minimap.js';
@@ -36,7 +37,11 @@ const quality = settings.quality || 'high';
 AiAssets.enabled = quality === 'high';
 const renderer = new Renderer(document.getElementById('game'), { quality });
 AiAssets.renderer = renderer.renderer;
+TexSettings.setRenderer(renderer.renderer);
+TexSettings.setQuality(quality);
 const world = new World(renderer.scene);
+world.grassScale = quality === 'high' ? 1 : 0.4;
+const focusV = new THREE.Vector3();
 world.loadAiProps(AiAssets);
 const vfx = new VFX(renderer.scene);
 const particles = new Particles(renderer.scene);
@@ -58,7 +63,8 @@ function loop() {
   if (slowT > 0) { slowT -= realDt; scale = Math.min(scale, FEEL.slowMo.scale); }
   const dt = realDt * scale;
   elapsed += dt;
-  world.update(elapsed, dt);
+  if (game) views.positionOf(game.playerId, 0, focusV); else focusV.set(Math.sin(elapsed * 0.07) * 14, 0, Math.cos(elapsed * 0.07) * 14);
+  world.update(elapsed, dt, focusV, renderer.night || 0);
   if (game) {
     input.update(realDt);
     game.update(dt);
@@ -88,9 +94,22 @@ requestAnimationFrame(loop);
 
 showTitle().then(({ profile, save }) => startGame(profile, save));
 
+// 확인 창 공통: E·Enter = 확인 (요약 창 · 상점 수량), Esc = 취소. 키를 소비해 월드로 새지 않게
+window.addEventListener('keydown', (e) => {
+  const tag = document.activeElement?.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+  const summary = document.getElementById('summary');
+  const qty = document.querySelector('#shop .qty:not(.hidden)');
+  const target = qty ? qty : (summary && !summary.classList.contains('hidden') ? summary : null);
+  if (!target) return;
+  if (e.code === 'KeyE' || e.code === 'Enter') { e.preventDefault(); e.stopImmediatePropagation(); if (!e.repeat) target.querySelector(qty ? '[data-q="ok"]' : 'button')?.click(); }
+  else if (e.code === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); if (qty) qty.querySelector('[data-q="cancel"]')?.click(); else summary.classList.add('hidden'); }
+}, true);
+
 function setQuality(q) {
   renderer.setQuality(q);
   particles.setQuality(q);
+  world.grassScale = q === 'high' ? 1 : 0.4;
   AiAssets.enabled = q === 'high';
   Save.saveSettings({ ...Save.loadSettings(), quality: q });
   hud?.toast(q === 'high' ? '그래픽: 높음 (후처리·AI 모델)' : '그래픽: 낮음 (후처리 끔·대체 모델 — 다시 시작 시 완전 적용)');
@@ -130,8 +149,12 @@ function startGame(profile, saveData) {
 
   game.init(profile, saveData);
   const pid = game.playerId;
+  window.__bernel = { game, renderer, world, views }; // 검증 스크립트(Playwright)용
   fx = new FxDirector({ bus, game, views, renderer, particles, hooks: { hitStop: (s) => { hitStopT = Math.max(hitStopT, s); }, slow: (s) => { slowT = Math.max(slowT, s); } } });
   world.setBridgeState(game.publicState.bridge.state);
+  world.setAnchorsFound(game.player().anchors);
+  bus.on('anchorFound', ({ name }) => { world.setAnchorsFound(game.player().anchors); hud.banner('실 매듭돌 발견', `${name} — 지도(M)에서 빠른 이동`); });
+  bus.on('recall', () => renderer.focus.copy(views.positionOf(game.playerId)));
   renderer.focus.copy(views.positionOf(pid));
   renderer.zoomTarget = 24;
 

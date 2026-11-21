@@ -130,7 +130,7 @@ export class ShopUI {
     let n = 1;
     const draw = () => {
       box.innerHTML = `<b>${ITEMS[id].name}</b> ${act === 'buy' ? '사기' : '팔기'}<div class="qrow"><button data-q="-10">-10</button><button data-q="-1">−</button><span>${n}</span><button data-q="1">+</button><button data-q="10">+10</button><button data-q="max">최대</button></div>
-        <div class="qrow"><span>합계 ${unit * n}골드</span><button class="primary" data-q="ok">${act === 'buy' ? '구입' : '판매'}</button><button data-q="cancel">취소</button></div>`;
+        <div class="qrow"><span>합계 ${unit * n}골드</span><button class="primary" data-q="ok">${act === 'buy' ? '구입' : '판매'}<span class="ekey">E</span></button><button data-q="cancel">취소</button></div>`;
       box.querySelectorAll('[data-q]').forEach((bt) => {
         bt.onclick = (e) => {
           e.stopPropagation();

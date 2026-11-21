@@ -56,6 +56,7 @@ export class HUD {
     for (const slot of SLOT_ORDER) {
       const sk = SKILLS[p.skills[slot]];
       const root = document.createElement('div');
+      if (!sk) { root.className = `skill locked ${slot === 'ult' ? 'ult' : ''} ${slot === 'a' ? 'gap' : ''}`; root.innerHTML = '<span class="key"></span>🔒<div class="tip"><b>잠김</b><br>전직하면 열리는 기술 칸</div>'; bar.appendChild(root); continue; }
       root.className = `skill ${slot === 'dodge' || slot === 'basic' ? 'small' : ''} ${slot === 'ult' ? 'ult' : ''} ${slot === 'a' ? 'gap' : ''}`;
       const res = CLASSES[p.classId].resource.name;
       const cost = sk.cost ? ` · ${res} ${sk.cost}` : sk.minRes ? ` · ${res} ${sk.minRes} 이상` : '';
@@ -110,7 +111,7 @@ export class HUD {
   /** 접속 시 "지난번 이후 바뀐 것" */
   showSummary(lines, intro) {
     const el = $('summary');
-    el.innerHTML = `<div class="qt-title">${intro ? '하르벤 교역 거점' : '지난 접속 이후 바뀐 것'}</div>${(intro ? [intro] : lines).map((l) => `<p>${l}</p>`).join('')}<button class="primary">확인</button>`;
+    el.innerHTML = `<div class="qt-title">${intro ? '하르벤 교역 거점' : '지난 접속 이후 바뀐 것'}</div>${(intro ? [intro] : lines).map((l) => `<p>${l}</p>`).join('')}<button class="primary">확인<span class="ekey">E</span></button>`;
     el.classList.remove('hidden');
     el.querySelector('button').addEventListener('click', () => el.classList.add('hidden'));
   }
@@ -152,7 +153,7 @@ export class HUD {
     const ch = p.channel;
     this.set('chan', ch ? `${ch.kind}:${Math.round((ch.t / ch.dur) * 20)}` : '', () => {
       $('channel').classList.toggle('hidden', !ch);
-      if (ch) { $('channel-fill').style.width = `${(ch.t / ch.dur) * 100}%`; $('channel-text').textContent = { gather: '채집 중', investigate: '조사 중', craft: '조립 중' }[ch.kind]; }
+      if (ch) { $('channel-fill').style.width = `${(ch.t / ch.dur) * 100}%`; $('channel-text').textContent = { gather: '채집 중', investigate: '조사 중', craft: '조립 중', help: '돕는 중', recall: '귀환 중', travel: '실을 따라 이동 중' }[ch.kind] || '작업 중'; }
     });
     // 대상
     const t = g.get(p.targetId);

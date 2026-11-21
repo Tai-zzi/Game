@@ -1,4 +1,21 @@
 import * as THREE from 'three';
+import { heightAt } from '../data/zones.js';
+
+/** 화면 광선이 지형과 만나는 점 (높이 함수로 행진 — 청크 지형과 무관하게 정확) */
+function rayGround(ray) {
+  const o = ray.origin, d = ray.direction;
+  let prev = 0;
+  for (let t = 0; t < 400; t += 0.8) {
+    const x = o.x + d.x * t, y = o.y + d.y * t, z = o.z + d.z * t;
+    if (y < heightAt(x, z)) {
+      let a = prev, b = t;
+      for (let k = 0; k < 8; k++) { const m = (a + b) / 2; const yy = o.y + d.y * m; if (yy < heightAt(o.x + d.x * m, o.z + d.z * m)) b = m; else a = m; }
+      return { x: o.x + d.x * b, y: o.y + d.y * b, z: o.z + d.z * b };
+    }
+    prev = t;
+  }
+  return null;
+}
 
 /**
  * 키 배치 프리셋 (W 충돌 해결: 이동 방식에 따라 기술 줄 전체를 옮긴다)
@@ -54,8 +71,8 @@ export class Input {
     this.ndc.set((clientX / window.innerWidth) * 2 - 1, -(clientY / window.innerHeight) * 2 + 1);
     this.ray.setFromCamera(this.ndc, this.camera);
     const hitE = this.ray.intersectObjects(this.views.pickables(), false)[0];
-    const hitG = this.ray.intersectObject(this.terrain, false)[0];
-    return { entityId: hitE?.object.userData.entityId ?? null, ground: hitG ? { x: hitG.point.x, z: hitG.point.z, y: hitG.point.y } : null };
+    const hitG = rayGround(this.ray.ray);
+    return { entityId: hitE?.object.userData.entityId ?? null, ground: hitG };
   }
 
   onDown(e) {

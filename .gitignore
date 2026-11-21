@@ -5,3 +5,6 @@ dist
 .env
 tools/higgsfield/requests.log.jsonl
 tools/verify/out
+
+# Mixamo 원본(Adobe 약관상 원본 재배포 금지) — 로컬 전용
+public/models/realistic/_src/

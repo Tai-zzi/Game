@@ -65,7 +65,7 @@ export class AiAssetLoader {
     holder.add(scene);
     const outer = new THREE.Group();
     outer.add(holder);
-    outer.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    outer.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; if (o.material) { o.material.metalness = Math.min(o.material.metalness ?? 0, 0.25); o.material.envMapIntensity = 1.2; } } });
     outer.userData.aiId = id;
     return outer;
   }

@@ -7,7 +7,7 @@ import sys, os, time, json
 from playwright.sync_api import sync_playwright
 
 URL = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:5199/"
-CLS = sys.argv[2] if len(sys.argv) > 2 else "guardian"
+CLS = sys.argv[2] if len(sys.argv) > 2 else "tank"  # 계열(archetype)
 OUT = os.path.join(os.path.dirname(__file__), "out")
 os.makedirs(OUT, exist_ok=True)
 
@@ -23,7 +23,7 @@ with sync_playwright() as p:
     page.wait_for_timeout(2500)
     page.screenshot(path=os.path.join(OUT, "01_title.png"))
     page.fill("#name-input", "검증")
-    page.click(f'button.choice[data-class="{CLS}"]')
+    page.click(f'button.choice[data-arch="{CLS}"]')
     page.wait_for_timeout(1500)
     page.screenshot(path=os.path.join(OUT, "02_create.png"))
     page.click("#start-btn")
@@ -32,6 +32,14 @@ with sync_playwright() as p:
     page.click("#summary button", timeout=3000) if page.is_visible("#summary button") else None
     page.wait_for_timeout(1500)
     page.screenshot(path=os.path.join(OUT, "03_game.png"))
+    # 근접 확대 (실사 모델 확인)
+    page.evaluate("() => { const r = window.__bernel?.renderer; if (r) { r.zoomTarget = r.zoomMin; r.zoom = r.zoomMin; } }")
+    page.wait_for_timeout(2500)
+    page.screenshot(path=os.path.join(OUT, "03b_close.png"))
+    # NPC 근접 (벨로 옆으로 순간 이동)
+    page.evaluate("""() => { const g = window.__bernel.game; const p = g.player(); const b = [...g.entities.values()].find((e) => e.npcId === 'belo' || e.id === 'belo' || e.id === 'npc_belo'); if (p && b) { p.x = b.x + 2.5; p.z = b.z + 2.5; } }""")
+    page.wait_for_timeout(3500)
+    page.screenshot(path=os.path.join(OUT, "03c_npc.png"))
     # 조작: 허수아비 → 공격
     page.mouse.move(800, 420)
     page.keyboard.press("F9")

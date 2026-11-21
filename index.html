@@ -4,8 +4,6 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>베르넬</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=Noto+Sans+KR:wght@400;600;800&display=swap" rel="stylesheet" />
 </head>
 <body>
   <div id="game"></div>
@@ -68,13 +66,14 @@
   </div>
 
   <div id="dialog" class="hidden">
+    <div id="dlg-portrait" class="hidden"></div>
     <div class="dlg-box stitched">
       <div class="dlg-head"><span id="dlg-name"></span><span id="dlg-title"></span></div>
       <div id="dlg-rel" class="hidden"></div>
       <div id="dlg-text"></div>
       <div id="dlg-terms" class="hidden"></div>
       <div id="dlg-options"></div>
-      <div class="dlg-hint">클릭 또는 Space로 계속</div>
+      <div class="dlg-hint">E · Space · 클릭: 계속/선택 · ↑↓·W/S: 선택 이동 · 1~9 · Esc: 닫기</div>
     </div>
   </div>
 
@@ -96,7 +95,7 @@
         <input id="name-input" maxlength="12" placeholder="이름을 입력하세요" autocomplete="off" />
         <label>출신 <small>전투 능력은 같습니다. 시작 소지품과 소개만 달라집니다.</small></label>
         <div id="origin-list" class="choice-list"></div>
-        <label>전투 직업 <small>싸우는 방식입니다. 성격은 당신이 정합니다. 거점에서 언제든 바꿀 수 있습니다.</small></label>
+        <label>전투 계열 <small>견습으로 시작해 Lv 10에 거점 교육 담당자에게서 전직합니다. 생업은 계열과 상관없이 누구나 익힙니다. 밑줄은 지금 플레이 가능한 전직.</small></label>
         <div id="class-list" class="choice-list classes"></div>
         </div><div id="turntable"><span class="cap" id="turntable-cap"></span></div></div>
         <button id="start-btn" class="primary">하르벤으로 간다</button>

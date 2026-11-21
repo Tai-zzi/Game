@@ -4,7 +4,7 @@ import { HARVEN } from '../data/zones.js';
  * 탐험 기록 (전장의 안개). 지역을 N×N 칸으로 나누고 플레이어 주변 반경을 밝힌다.
  * 비트로 묶어 base64 로 저장 (128×128 → 2KB).
  */
-export const EXPLORE = { cells: 128, radius: 22, interval: 0.4 };
+export const EXPLORE = { cells: 256, radius: 30, interval: 0.4 };
 
 export class ExploreMap {
   constructor(saved = null) {

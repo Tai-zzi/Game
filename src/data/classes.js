@@ -51,6 +51,25 @@ export const CLASSES = {
   },
 };
 
+/**
+ * 전직 전 견습 직업 (계열별, v0.3 제안 기준). 기술 일부만 쓰고, Lv ${ADVANCE} 에 심화 직업으로 전직한다.
+ * 수치는 검증 전 예시. 빈 칸은 전직 후 열린다.
+ */
+const novice = (id, name, role, modelId, resource, base, skills, weapon) => ({ id, name, role, modelId, resource, base, perLevel: { maxHp: 22, atk: 2.1, def: 1.0 }, skills: { dodge: 'dodge', ...skills }, novice: true, weapon, judgement: '전직 전 기본기', weakness: '기술이 적다' });
+const RES = {
+  resolve: { id: 'resolve', name: '결의', max: 100, start: 0, rule: '공격·막기로 쌓이고 비전투 시 줄어든다.' },
+  marks: { id: 'marks', name: '표식', max: 3, start: 0, rule: '표식 화살로 남기고 연결 사격으로 터뜨린다.' },
+  elements: { id: 'elements', name: '원소식', max: 3, start: 0, rule: '불씨·서리선으로 채우고 완성 문양으로 쓴다.' },
+};
+Object.assign(CLASSES, {
+  novice_common: novice('novice_common', '일반인 (견습)', '생업 중심', 'npc_villager_a', RES.resolve, { maxHp: 150, atk: 9, def: 4, moveSpeed: 5.3, critChance: 0.05 }, { basic: 'd_basic', q: 'g_shield', w: 'g_rush' }, '작업 지팡이'),
+  novice_blade: novice('novice_blade', '견습 검사', '근접 공격', 'player_guardian', RES.resolve, { maxHp: 160, atk: 12, def: 4.5, moveSpeed: 5.3, critChance: 0.08 }, { basic: 'g_basic', q: 'g_chain', w: 'g_rush', e: 'g_parry', r: 'g_release' }, '한손검'),
+  novice_tank: novice('novice_tank', '견습 방패병', '방어', 'player_guardian', RES.resolve, { maxHp: 180, atk: 9, def: 6, moveSpeed: 5.0, critChance: 0.05 }, { basic: 'g_basic', q: 'g_shield', w: 'g_parry', e: 'g_taunt' }, '방패와 창'),
+  novice_ranged: novice('novice_ranged', '견습 사수', '원거리 공격', 'player_archer', RES.marks, { maxHp: 130, atk: 12, def: 3, moveSpeed: 5.4, critChance: 0.1 }, { basic: 'a_basic', q: 'a_mark', w: 'a_link', e: 'a_knotstep' }, '사냥 활'),
+  novice_mage: novice('novice_mage', '견습 술사', '마법 공격', 'player_elementalist', RES.elements, { maxHp: 120, atk: 13, def: 2.5, moveSpeed: 5.2, critChance: 0.08 }, { basic: 'e_basic', q: 'e_ember', w: 'e_frost', e: 'e_complete' }, '나무 지팡이'),
+});
+
+/** 플레이 가능한 심화 직업 (전직 후) */
 export const CLASS_ORDER = ['guardian', 'archer', 'elementalist', 'dyer'];
 export const MAX_LEVEL_SLICE = 20;
 export const xpToNext = (level) => Math.round(70 * Math.pow(level, 1.55) + 50);

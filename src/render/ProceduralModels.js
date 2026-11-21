@@ -34,48 +34,78 @@ function looseStrand(from, dir, len, color, seed) {
   return new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 20, 0.02, 4), glowMat(color, 0.75));
 }
 
-function buildSheep(root) {
-  const wool = std('#f2ece0', { flatShading: true, roughness: 1 }), dark = std('#3b3330'), legM = std('#2f2926');
-  const bodyG = new THREE.Group(); bodyG.position.y = 0.62; root.add(bodyG);
-  const blobs = [[0, 0, 0, 0.42], [0.2, 0.08, 0.18, 0.3], [-0.2, 0.08, 0.15, 0.3], [0.18, 0.05, -0.22, 0.3], [-0.16, 0.12, -0.2, 0.28], [0, 0.22, 0, 0.3]];
-  for (const [x, y, z, r] of blobs) bodyG.add(mesh(new THREE.IcosahedronGeometry(r, 0), wool, x, y, z));
-  // 풀려버린 옆구리: 실 나선이 드러남
-  const coil = helixThread(0.28, 0.4, 5, '#ffd27a'); coil.rotation.z = Math.PI / 2; coil.position.set(0.05, 0.02, -0.38); bodyG.add(coil);
-  const head = pivot(root, 0, 0.78, 0.45);
-  head.add(mesh(new THREE.BoxGeometry(0.24, 0.26, 0.32), dark, 0, 0, 0.08));
-  head.add(mesh(new THREE.IcosahedronGeometry(0.16, 0), wool, 0, 0.16, 0));
-  const eye = glowMat('#cfe0ff');
-  head.add(mesh(new THREE.SphereGeometry(0.035, 6, 6), eye, -0.09, 0.04, 0.2), mesh(new THREE.SphereGeometry(0.035, 6, 6), eye, 0.09, 0.04, 0.2));
-  // 실로 된 뿔
-  for (const s of [-1, 1]) { const horn = helixThread(0.05, 0.18, 2, '#e8c87a'); horn.position.set(s * 0.15, 0.12, 0); horn.rotation.z = s * 1.0; head.add(horn); }
-  const legs = [];
-  for (const [x, z] of [[-0.2, 0.25], [0.2, 0.25], [-0.2, -0.25], [0.2, -0.25]]) {
-    const l = pivot(root, x, 0.42, z); l.add(mesh(new THREE.CylinderGeometry(0.05, 0.045, 0.42, 6), legM, 0, -0.21, 0)); legs.push(l);
+// ───── 털 질감 (캔버스 생성: 색 텍스처 + 범프) ─────
+const furCache = {};
+function furTex(base, dark, kind) {
+  const key = base + dark + kind;
+  if (furCache[key]) return furCache[key];
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = base; g.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < (kind === 'wool' ? 900 : 2400); i++) {
+    const x = Math.random() * 256, y = Math.random() * 256;
+    if (kind === 'wool') { // 곱슬 털뭉치
+      g.strokeStyle = Math.random() < 0.5 ? dark : 'rgba(255,255,255,0.35)'; g.lineWidth = 1.2;
+      g.beginPath(); g.arc(x, y, 2 + Math.random() * 4, Math.random() * 6, Math.random() * 6 + 3); g.stroke();
+    } else { // 결이 있는 짧은 털
+      g.strokeStyle = Math.random() < 0.55 ? dark : 'rgba(255,255,255,0.18)'; g.lineWidth = 0.8;
+      g.beginPath(); g.moveTo(x, y); g.lineTo(x + (Math.random() - 0.5) * 2, y + 4 + Math.random() * 5); g.stroke();
+    }
   }
-  for (let i = 0; i < 3; i++) root.add(looseStrand(new THREE.Vector3(0.1 * (i - 1), 0.75, -0.5), new THREE.Vector3(0.2 * (i - 1), -0.3, -1), 0.9, '#ffd98a', i * 2));
+  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace;
+  const b = new THREE.CanvasTexture(c); b.wrapS = b.wrapT = THREE.RepeatWrapping;
+  return (furCache[key] = { map: t, bump: b });
+}
+const fur = (base, dark, kind, extra = {}) => { const f = furTex(base, dark, kind); return std('#ffffff', { map: f.map, bumpMap: f.bump, bumpScale: kind === 'wool' ? 2.5 : 1.2, roughness: 1, ...extra }); };
+function ellip(r, sx, sy, sz, mat, x = 0, y = 0, z = 0, seg = 18) { const m = new THREE.Mesh(new THREE.SphereGeometry(r, seg, Math.round(seg * 0.75)), mat); m.scale.set(sx, sy, sz); m.position.set(x, y, z); return m; }
+/** 관절 다리: 위·아래 마디 + 발굽/발 */
+function leg(root, x, y, z, len, thick, mat, hoofMat) {
+  const p = pivot(root, x, y, z);
+  p.add(mesh(new THREE.CapsuleGeometry(thick, len * 0.45, 4, 10), mat, 0, -len * 0.28, 0));
+  p.add(mesh(new THREE.CapsuleGeometry(thick * 0.7, len * 0.45, 4, 8), mat, 0, -len * 0.72, thick * 0.3));
+  p.add(mesh(new THREE.CylinderGeometry(thick * 0.75, thick * 0.9, 0.08, 10), hoofMat, 0, -len + 0.04, thick * 0.3));
+  return p;
+}
+
+/** 풀린 양: 실제 양 비율 (긴 몸통·가는 다리·처진 귀) + 곱슬 양털, 옆구리가 실로 풀림 */
+function buildSheep(root) {
+  const wool = fur('#e8e2d4', 'rgba(150,140,120,0.5)', 'wool'), face = fur('#3a302a', 'rgba(0,0,0,0.5)', 'short'), hoof = std('#1e1a18');
+  const body = new THREE.Group(); body.position.y = 0.72; root.add(body);
+  body.add(ellip(0.42, 1.0, 0.92, 1.45, wool, 0, 0, -0.05, 22));
+  body.add(ellip(0.3, 1.05, 0.95, 1.0, wool, 0, 0.12, 0.36));
+  const coil = helixThread(0.3, 0.42, 5, '#ffd27a'); coil.rotation.z = Math.PI / 2; coil.position.set(0.32, 0.02, -0.2); body.add(coil);
+  const head = pivot(root, 0, 0.92, 0.62);
+  head.add(ellip(0.13, 0.95, 1.0, 1.6, face, 0, -0.04, 0.1, 14));
+  head.add(ellip(0.15, 1.1, 0.8, 0.9, wool, 0, 0.08, -0.02, 14));
+  for (const s of [-1, 1]) { const ear = ellip(0.07, 0.5, 0.25, 1.0, face, s * 0.14, 0.02, -0.02, 8); ear.rotation.z = s * 0.9; head.add(ear); }
+  const eye = glowMat('#cfe0ff');
+  head.add(mesh(new THREE.SphereGeometry(0.022, 6, 6), eye, -0.075, 0.03, 0.2), mesh(new THREE.SphereGeometry(0.022, 6, 6), eye, 0.075, 0.03, 0.2));
+  const legs = [];
+  for (const [x, z] of [[-0.18, 0.36], [0.18, 0.36], [-0.18, -0.4], [0.18, -0.4]]) legs.push(leg(root, x, 0.52, z, 0.52, 0.05, face, hoof));
+  for (let i = 0; i < 3; i++) root.add(looseStrand(new THREE.Vector3(0.2 + 0.06 * i, 0.78, -0.55), new THREE.Vector3(0.25, -0.3, -1), 0.9, '#ffd98a', i * 2));
   return { head, legs };
 }
 
+/** 풀린 늑대: 긴 주둥이·가는 다리·풍성한 꼬리 + 결 있는 회색 털, 허리 일부가 실 고리로 비어 있음 */
 function buildWolf(root) {
-  const fur = std('#6f6a66', { flatShading: true }), dark = std('#3e3a38', { flatShading: true }), legM = std('#55504c');
-  const bodyG = new THREE.Group(); bodyG.position.y = 0.72; root.add(bodyG);
-  const torso = mesh(new THREE.CapsuleGeometry(0.28, 0.75, 4, 8), fur); torso.rotation.x = Math.PI / 2; bodyG.add(torso);
-  bodyG.add(mesh(new THREE.IcosahedronGeometry(0.34, 0), dark, 0, 0.08, 0.32));
-  // 풀려 비어버린 허리: 실 고리만 남음
-  for (let i = 0; i < 3; i++) { const ring = new THREE.Mesh(new THREE.TorusGeometry(0.27, 0.015, 4, 18), glowMat('#b8c8ff', 0.8)); ring.position.z = -0.15 - i * 0.14; bodyG.add(ring); }
-  const head = pivot(root, 0, 0.92, 0.62);
-  head.add(mesh(new THREE.BoxGeometry(0.3, 0.28, 0.3), fur, 0, 0, 0));
-  const snout = mesh(new THREE.ConeGeometry(0.12, 0.32, 4), dark, 0, -0.05, 0.28); snout.rotation.x = Math.PI / 2; snout.rotation.y = Math.PI / 4; head.add(snout);
-  for (const s of [-1, 1]) head.add(mesh(new THREE.ConeGeometry(0.06, 0.16, 4), dark, s * 0.1, 0.2, -0.05));
+  const coat = fur('#6e6862', 'rgba(30,26,24,0.55)', 'short'), dark = fur('#3a3532', 'rgba(0,0,0,0.5)', 'short'), pale = fur('#a8a29a', 'rgba(60,55,50,0.4)', 'short'), paw = std('#2a2624');
+  const body = new THREE.Group(); body.position.y = 0.78; root.add(body);
+  body.add(ellip(0.3, 0.9, 1.0, 1.9, coat, 0, 0, -0.05, 20));
+  body.add(ellip(0.34, 1.0, 1.05, 1.0, dark, 0, 0.05, 0.38, 18)); // 갈기
+  body.add(ellip(0.22, 0.9, 0.8, 1.0, pale, 0, -0.14, 0.32, 14)); // 가슴 털
+  for (let i = 0; i < 3; i++) { const ring = new THREE.Mesh(new THREE.TorusGeometry(0.26, 0.012, 4, 22), glowMat('#b8c8ff', 0.8)); ring.position.z = -0.3 - i * 0.12; body.add(ring); }
+  const head = pivot(root, 0, 0.98, 0.72);
+  head.add(ellip(0.16, 1.0, 0.9, 1.15, coat, 0, 0, 0, 16));
+  const snout = ellip(0.085, 0.95, 0.75, 2.2, pale, 0, -0.05, 0.22, 12); head.add(snout);
+  head.add(mesh(new THREE.SphereGeometry(0.03, 8, 6), paw, 0, -0.02, 0.4));
+  for (const s of [-1, 1]) { const ear = new THREE.Mesh(new THREE.ConeGeometry(0.055, 0.15, 6), dark); ear.position.set(s * 0.085, 0.16, -0.03); ear.rotation.z = -s * 0.15; head.add(ear); }
   const eye = glowMat('#9fd0ff');
-  head.add(mesh(new THREE.SphereGeometry(0.03, 6, 6), eye, -0.08, 0.05, 0.15), mesh(new THREE.SphereGeometry(0.03, 6, 6), eye, 0.08, 0.05, 0.15));
-  const tail = pivot(root, 0, 0.82, -0.62);
-  const tm = mesh(new THREE.ConeGeometry(0.09, 0.55, 5), fur, 0, 0, -0.25); tm.rotation.x = -Math.PI / 2 - 0.4; tail.add(tm);
+  head.add(mesh(new THREE.SphereGeometry(0.022, 6, 6), eye, -0.07, 0.05, 0.14), mesh(new THREE.SphereGeometry(0.022, 6, 6), eye, 0.07, 0.05, 0.14));
+  const tail = pivot(root, 0, 0.86, -0.62);
+  const tm = ellip(0.09, 1.0, 1.0, 4.2, coat, 0, -0.1, -0.32, 12); tm.rotation.x = 0.5; tail.add(tm);
   const legs = [];
-  for (const [x, z] of [[-0.17, 0.35], [0.17, 0.35], [-0.17, -0.35], [0.17, -0.35]]) {
-    const l = pivot(root, x, 0.55, z); l.add(mesh(new THREE.CylinderGeometry(0.06, 0.045, 0.55, 6), legM, 0, -0.27, 0)); legs.push(l);
-  }
-  for (let i = 0; i < 4; i++) root.add(looseStrand(new THREE.Vector3(0.12 * (i - 1.5), 0.8, -0.55), new THREE.Vector3(0.25 * (i - 1.5), -0.2, -1), 1.1, '#b8c8ff', i * 1.7));
+  for (const [x, z] of [[-0.14, 0.42], [0.14, 0.42], [-0.14, -0.42], [0.14, -0.42]]) legs.push(leg(root, x, 0.62, z, 0.62, 0.05, coat, paw));
+  for (let i = 0; i < 4; i++) root.add(looseStrand(new THREE.Vector3(0.1 * (i - 1.5), 0.82, -0.58), new THREE.Vector3(0.25 * (i - 1.5), -0.2, -1), 1.0, '#b8c8ff', i * 1.7));
   return { head, legs, tail };
 }
 

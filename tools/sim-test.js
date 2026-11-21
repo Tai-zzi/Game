@@ -125,13 +125,13 @@ console.log('6) 저장 형식 v3 / 구 저장 이관 / 변경 요약');
 {
   const { g } = newGame('archer', 'port');
   const s = g.serialize();
-  ok(s.version === 3 && s.character && s.personal && s.public && s.world, '저장: character / personal / public / world 층 분리');
+  ok(s.version === 4 && s.character && s.personal && s.public && s.world, '저장: character / personal / public / world 층 분리');
   ok(s.character.inventory.rope === 1, '출신 소지품(항구 노동자 → 밧줄)');
   s.savedAt = Date.now() - 600 * 1000;
   const { g: g2 } = newGame('archer', 'port', s);
   ok(g2.offlineGain > 0 && g2.changesSinceLastSeen().length > 0, `부재 중 진행 +${g2.offlineGain}, 변경 요약 ${g2.changesSinceLastSeen().length}줄`);
   const old = migrateSave({ name: '옛사람', classId: 'apprentice', level: 4, xp: 10, quests: {}, version: 1 });
-  ok(old.version === 3 && old.needsProfile && old.character.level === 4, '구 저장(v1) → 이름·레벨 유지, 출신·직업 다시 선택');
+  ok(old.version === 4 && old.needsProfile && old.character.level === 4, '구 저장(v1) → 이름·레벨 유지, 출신·직업 다시 선택');
 }
 
 console.log('7) 상점 · 소지품 · 장비');
@@ -232,7 +232,7 @@ console.log('10) 기술 데이터 검증');
   const { SKILLS, SKILL_SLOTS } = await import('../src/data/skills.js');
   const { SKILL_ANIMS } = await import('../src/data/animations.js');
   const { CLASSES } = await import('../src/data/classes.js');
-  for (const c of Object.values(CLASSES)) {
+  for (const c of Object.values(CLASSES).filter((x) => !x.novice)) {
     const ids = SKILL_SLOTS.map((s) => c.skills[s]);
     const all = [...ids, c.skills.ult, c.skills.basic, c.skills.dodge];
     ok(ids.length === 8 && new Set(ids).size === 8 && ids.every((id) => SKILLS[id]) && SKILLS[c.skills.ult]?.ult, `${c.name}: 기술 8개 + 각성기`);
@@ -385,7 +385,7 @@ console.log('15) 탐험 지도 · 질주 · 구르기 충전');
   ok(g.explore.isExplored(60, 60), '이동한 곳이 밝혀짐');
   const ex2 = new ExploreMap(g.explore.serialize());
   ok(ex2.isExplored(60, 60) && !ex2.isExplored(-90, 80), '탐험 기록 저장/불러오기');
-  teleport(p, -80, 20);
+  teleport(p, -200, -100);
   g.command({ type: 'sprint', on: true }); g.command({ type: 'moveDir', x: 1, z: 0 });
   const x0 = p.pos.x;
   run(g, 1);
@@ -450,6 +450,56 @@ console.log('17) 잡화점: 수량 · 되팔기 40% · 되사기 · 음식 · �
   ok(g.serialize().personal.buyback !== undefined, '되사기 목록 저장');
   g.command({ type: 'buy', item: 'potion_m' });
   ok(!(p.inventory.potion_m > 0), '다리가 끊긴 동안 일부 물건은 입고 대기');
+}
+
+console.log('18) 넓은 계곡: 성벽 · 매듭돌 빠른 이동 · 지역');
+{
+  const { HARVEN, regionAt, heightAt } = await import('../src/data/zones.js');
+  const { g, p } = newGame('archer');
+  ok(HARVEN.size >= 1500 && HARVEN.boundsRadius >= 700, `지역 크기 ${HARVEN.size}m, 걸을 수 있는 반경 ${HARVEN.boundsRadius}m`);
+  teleport(p, 0, 30); g.command({ type: 'moveDir', x: 0, z: -1 }); run(g, 0.2); g.command({ type: 'moveDir', x: 0, z: 0 });
+  teleport(p, -20, 20); g.command({ type: 'moveDir', x: -0.7, z: 0.7 }); run(g, 3); g.command({ type: 'moveDir', x: 0, z: 0 });
+  ok(Math.hypot(p.pos.x, p.pos.z) < HARVEN.walls.r, '성벽은 문이 아니면 지나갈 수 없다');
+  teleport(p, 34, 3); g.command({ type: 'moveDir', x: 1, z: 0 }); run(g, 1); g.command({ type: 'moveDir', x: 0, z: 0 });
+  ok(Math.hypot(p.pos.x, p.pos.z) > HARVEN.walls.r + 1, '동문으로는 나갈 수 있다');
+  const a = HARVEN.anchors.find((x) => x.id === 'lake');
+  g.command({ type: 'travel', id: 'lake' });
+  ok(!p.channel, '찾지 못한 매듭돌로는 이동 불가');
+  teleport(p, a.x, a.z); run(g, 0.2);
+  ok(p.anchors.includes('lake'), '매듭돌 발견');
+  teleport(p, -200, -150); p.lastCombat = -99;
+  g.command({ type: 'travel', id: 'lake' }); run(g, 2.8);
+  ok(Math.hypot(p.pos.x - a.x, p.pos.z - a.z) < 5, '발견한 매듭돌로 빠른 이동');
+  ok(regionAt(-380, 300).id === 'ruins' && regionAt(-40, 380).id === 'forest' && heightAt(600, 600) > 40, '지역: 폐허·숲·바깥 산맥');
+  ok(HARVEN.spawns.filter((s) => (s.levelRange?.[0] || 1) >= 7).length >= 4, '멀리 갈수록 높은 레벨 거점');
+}
+
+console.log('19) 계열 → 전직 (v0.3 제안 기준)');
+{
+  const { ARCHETYPES, ADVANCE_LEVEL } = await import('../src/data/archetypes.js');
+  const { CLASSES } = await import('../src/data/classes.js');
+  const { migrateSave } = await import('../src/core/Save.js');
+  const bus = new EventBus();
+  const g = new GameState(bus, { seed: 3 }); g.init({ name: '견습', origin: 'farm', archetype: 'ranged' });
+  const p = g.player();
+  ok(p.classId === 'novice_ranged' && !p.advanced && p.archetype === 'ranged', '계열 선택 → 견습 사수로 시작');
+  ok(Object.values(ARCHETYPES).every((a) => CLASSES[a.novice]?.novice), '모든 계열에 견습 직업');
+  teleport(p, 0, 8); p.lastCombat = -99;
+  g.command({ type: 'advance', classId: 'archer' });
+  ok(p.classId === 'novice_ranged', 'Lv ' + ADVANCE_LEVEL + ' 전에는 전직 불가');
+  g.command({ type: 'changeClass', classId: 'guardian' });
+  ok(p.classId === 'novice_ranged', '전직 전에는 직업 변경 불가');
+  p.level = ADVANCE_LEVEL;
+  g.command({ type: 'advance', classId: 'shooter' });
+  ok(p.classId === 'novice_ranged', '준비 중인 심화 직업(슈터 — 제안)으로는 전직 불가');
+  ok(g.dialog('trainer').options.some((o) => o.action?.type === 'advance'), '교육 담당자: 전직 선택지');
+  g.command({ type: 'advance', classId: 'archer' });
+  ok(p.classId === 'archer' && p.advanced && p.skills.ult === 'a_ult', '전직 → 매듭궁수 (기술 8개 + 각성기 열림)');
+  ok(g.serialize().character.archetype === 'ranged' && g.serialize().character.advanced === true, '저장: 계열·전직 여부');
+  const old = migrateSave({ version: 3, character: { name: '옛', classId: 'dyer', level: 5 }, personal: {}, public: {}, world: {} });
+  ok(old.version === 4 && old.character.archetype === 'mage' && old.character.advanced === true, '구 저장(v3) 이관: 기존 직업 = 전직한 심화 직업');
+  const g2 = new GameState(new EventBus(), { seed: 3 }); g2.init({ name: '구', origin: 'farm', classId: 'dyer' }, old);
+  ok(g2.player().classId === 'dyer' && g2.player().advanced, '이관한 캐릭터는 그대로 생명염색사');
 }
 
 console.log(failures ? `\nFAIL (${failures})` : '\nOK');

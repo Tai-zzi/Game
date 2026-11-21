@@ -1,6 +1,8 @@
 import { Save } from '../core/Save.js';
 import { ORIGINS, ORIGIN_ORDER } from '../data/origins.js';
-import { CLASSES, CLASS_ORDER } from '../data/classes.js';
+import { CLASSES } from '../data/classes.js';
+import { ARCHETYPES, ARCHETYPE_ORDER, ADVANCE_LEVEL } from '../data/archetypes.js';
+import { MIXAMO_SKINS } from '../data/animations.js';
 import * as THREE from 'three';
 import { CLASS_PREVIEW, AI_CONCEPT_DIR } from '../data/aiAssets.js';
 import { AiAssets } from '../render/AiAssets.js';
@@ -31,13 +33,17 @@ class Turntable {
     const loop = () => { if (!this.alive) return; this.frame(); requestAnimationFrame(loop); };
     loop();
   }
+  /** 리그 모델(Mixamo 실사)이 있으면 그것을, 없으면 AI 정적 미리보기를 돌린다 */
   async show(classId) {
     this.want = classId;
     this.pivot.clear(); this.model = null;
-    const ai = await AiAssets.instance(CLASS_PREVIEW[classId]);
-    if (this.want !== classId) return;
-    if (ai) { this.pivot.add(ai); return 'ai'; }
-    this.model = new CharacterModel(CLASSES[classId].modelId);
+    const modelId = CLASSES[classId].modelId;
+    if (!MIXAMO_SKINS[modelId]) {
+      const ai = await AiAssets.instance(CLASS_PREVIEW[classId]);
+      if (this.want !== classId) return;
+      if (ai) { this.pivot.add(ai); return 'ai'; }
+    }
+    this.model = new CharacterModel(modelId);
     this.pivot.add(this.model.root);
     return 'rig';
   }
@@ -63,12 +69,14 @@ export function showTitle() {
   return new Promise((resolve) => {
     const save = Save.load();
     $('loading').classList.add('hidden');
-    let origin = 'farm', classId = 'guardian';
+    let origin = 'farm', archetype = 'tank';
+    const ARCH_PREVIEW = { common: 'dyer', blade: 'guardian', tank: 'guardian', ranged: 'archer', mage: 'elementalist' };
     let tt = null;
     const showModel = () => {
       tt ||= new Turntable($('turntable'));
-      $('turntable-cap').textContent = `${CLASSES[classId].name} · ${CLASSES[classId].weapon}`;
-      tt.show(classId);
+      const nov = CLASSES[ARCHETYPES[archetype].novice];
+      $('turntable-cap').textContent = `${nov.name} · ${nov.weapon}`;
+      tt.show(nov.id);
     };
     const finish = (profile, s) => {
       tt?.dispose();
@@ -97,23 +105,24 @@ export function showTitle() {
         const o = ORIGINS[id];
         return `<button class="choice ${id === origin ? 'on' : ''}" data-origin="${id}"><b>${o.name}</b><small>${o.desc}</small></button>`;
       }).join('');
-      $('class-list').innerHTML = CLASS_ORDER.map((id) => {
-        const c = CLASSES[id];
-        return `<button class="choice ${id === classId ? 'on' : ''}" data-class="${id}" style="background-image:url(${BASE}${AI_CONCEPT_DIR}${CLASS_PREVIEW[id]}.webp)"><b>${c.name}</b><em>${c.role}</em>
-          <small>${c.weapon}</small><small>판단: ${c.judgement}</small><small>자원: ${c.resource.name}</small><small class="weak">약점: ${c.weakness}</small></button>`;
+      $('class-list').innerHTML = ARCHETYPE_ORDER.map((id) => {
+        const a = ARCHETYPES[id];
+        const adv = a.advances?.length ? a.advances.map((x) => (x.playable ? `<u>${x.name}</u>` : x.name)).join(' · ') : '전직 없음 — 생업 중심';
+        return `<button class="choice ${id === archetype ? 'on' : ''}" data-arch="${id}" style="background-image:url(${BASE}${AI_CONCEPT_DIR}${CLASS_PREVIEW[ARCH_PREVIEW[id]]}.webp)"><b>${a.icon || ''} ${a.name}</b><em>${CLASSES[a.novice].name}</em>
+          <small>${a.desc}</small><small>Lv ${ADVANCE_LEVEL} 전직: ${adv}</small></button>`;
       }).join('');
     };
     $('title-create').addEventListener('click', (e) => {
       const b = e.target.closest('button.choice');
       if (!b) return;
       if (b.dataset.origin) origin = b.dataset.origin;
-      if (b.dataset.class && b.dataset.class !== classId) { classId = b.dataset.class; showModel(); }
+      if (b.dataset.arch && b.dataset.arch !== archetype) { archetype = b.dataset.arch; showModel(); }
       renderChoices();
     });
     $('start-btn').addEventListener('click', () => {
       const name = ($('name-input').value || '').trim().slice(0, 12) || '이름 없는 여행자';
       const s = save?.needsProfile ? { ...save, needsProfile: false, character: { ...save.character, name } } : null;
-      finish({ name, origin, classId }, s);
+      finish({ name, origin, archetype, classId: ARCHETYPES[archetype].novice }, s);
     });
     $('name-input').addEventListener('keydown', (e) => e.stopPropagation());
 

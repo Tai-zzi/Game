@@ -13,16 +13,23 @@ export class Dialog {
     this.getPage = getPage;
     this.el = $('dialog');
     this.open = false;
+    this.sel = 0;
     this.el.querySelector('.dlg-box').addEventListener('mousedown', (e) => {
       e.stopPropagation();
       if (e.target.tagName !== 'BUTTON') this.advance();
     });
+    // 대화 중 키는 여기서 소비한다 (월드 조작으로 새지 않게): E·Space·Enter = 수락/다음, ↑↓·W/S = 선택 이동, 1~9 = 바로 선택, Esc = 닫기
     window.addEventListener('keydown', (e) => {
       if (!this.open) return;
-      if (e.code === 'Space' || e.code === 'Enter') { e.preventDefault(); e.stopImmediatePropagation(); this.advance(); }
-      if (e.code === 'Escape') { e.stopImmediatePropagation(); this.close(); }
+      const opts = this.data.options, shown = !this.typing && this.idx === this.data.lines.length - 1;
+      const eat = () => { e.preventDefault(); e.stopImmediatePropagation(); };
+      if (e.code === 'KeyE' || e.code === 'Space' || e.code === 'Enter') { eat(); if (e.repeat) return; if (shown && opts.length) this.choose(opts[this.sel] || opts[0]); else this.advance(); return; }
+      if (e.code === 'Escape') { eat(); this.close(); return; }
+      if (shown && (e.code === 'ArrowDown' || e.code === 'KeyS' || e.code === 'ArrowRight')) { eat(); this.select(this.sel + 1); return; }
+      if (shown && (e.code === 'ArrowUp' || e.code === 'KeyW' || e.code === 'ArrowLeft')) { eat(); this.select(this.sel - 1); return; }
       const n = parseInt(e.key, 10);
-      if (n >= 1 && n <= 9 && !this.typing && this.data.options[n - 1]) { e.stopImmediatePropagation(); this.choose(this.data.options[n - 1]); }
+      if (n >= 1 && n <= 9) { eat(); if (shown && opts[n - 1]) this.choose(opts[n - 1]); return; }
+      if (/^Key|^Digit/.test(e.code)) eat(); // 대화 중 다른 기술 키도 막는다
     }, true);
   }
 
@@ -32,6 +39,9 @@ export class Dialog {
     this.open = true;
     this.el.classList.remove('hidden');
     $('dlg-name').textContent = NPCS[data.npcId].name;
+    const portrait = { haila: 'npc_hayla', belo: 'npc_bello', mora: 'npc_mora', merchant: 'npc_merchant' }[data.npcId];
+    const pe = $('dlg-portrait');
+    if (pe) { pe.style.backgroundImage = portrait && !data.substitute ? `url(${import.meta.env.BASE_URL}art/concept/${portrait}.webp)` : 'none'; pe.classList.toggle('hidden', !portrait || data.substitute); }
     $('dlg-title').textContent = data.title;
     this.renderRel(data);
     const terms = $('dlg-terms');
@@ -89,8 +99,18 @@ export class Dialog {
       b.textContent = `${i + 1}. ${o.label}`;
       if (o.secondary) b.className = 'secondary';
       b.addEventListener('mousedown', (e) => { e.stopPropagation(); this.choose(o); });
+      b.addEventListener('mouseenter', () => this.select(i));
       box.appendChild(b);
     });
+    this.select(Math.max(0, this.data.options.findIndex((o) => !o.secondary)));
+  }
+
+  /** 선택 표시 + 주 버튼에 [E] */
+  select(i) {
+    const btns = [...$('dlg-options').children];
+    if (!btns.length) return;
+    this.sel = (i + btns.length) % btns.length;
+    btns.forEach((b, k) => { b.classList.toggle('sel', k === this.sel); b.querySelector('.ekey')?.remove(); if (k === this.sel) b.insertAdjacentHTML('beforeend', '<span class="ekey">E</span>'); });
   }
 
   advance() {

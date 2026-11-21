@@ -1,5 +1,6 @@
 import { HARVEN, heightAt, riverX } from '../data/zones.js';
 import { npcMarker } from '../game/Dialogs.js';
+import { mapGrid } from './MapGrid.js';
 
 /**
  * 원형 미니맵. 지형은 한 번만 오프스크린 캔버스에 그려두고,
@@ -8,14 +9,16 @@ import { npcMarker } from '../game/Dialogs.js';
 export class Minimap {
   constructor(canvas, game, camFwd) {
     this.canvas = canvas; this.ctx = canvas.getContext('2d'); this.game = game;
-    this.range = 48; // 반경(월드 단위)
+    this.range = 70; // 반경(월드 단위)
     this.rot = -Math.PI / 2 - Math.atan2(camFwd.z, camFwd.x); // 카메라 전방이 위로
-    this.bgScale = 2; // 월드 1 = 2px
+    this.bgScale = 1; // 월드 1m = 1px (넓은 계곡)
     this.bg = this.renderBackground();
     this.t = 0;
   }
 
   renderBackground() {
+    this.grid = mapGrid();
+    const g2 = (v) => v;
     const S = HARVEN.size, px = S * this.bgScale / 2; // 해상도 절반으로 그린 뒤 확대
     const c = document.createElement('canvas'); c.width = c.height = px;
     const g = c.getContext('2d');
@@ -23,9 +26,10 @@ export class Minimap {
     const H = HARVEN.hollow;
     for (let j = 0; j < px; j++) for (let i = 0; i < px; i++) {
       const x = (i / px - 0.5) * S, z = (j / px - 0.5) * S;
-      const h = heightAt(x, z);
-      let r = 112 + h * 6, gg = 150 + h * 5, b = 78 + h * 3;
-      if (Math.abs(x - riverX(z)) < 5) { r = 80; gg = 150; b = 175; }
+      const h = this.grid.at(x, z);
+      let r = 112 + h * 2.2, gg = 150 + h * 1.6, b = 78 + h * 1.2;
+      if (h > 100) { r = g2(220); gg = g2(220); b = g2(226); }
+      if ((Math.abs(x - riverX(z)) < 6 && Math.abs(z) < 720) || Math.hypot(x - HARVEN.lake.x, z - HARVEN.lake.z) < HARVEN.lake.r * 0.95) { r = 80; gg = 140; b = 170; }
       else if (Math.hypot(x, z) < 10) { r = 190; gg = 160; b = 110; }
       if (Math.hypot(x - H.x, z - H.z) < H.radius) { const m = (r + gg + b) / 3; r = (r + m * 2) / 3; gg = (gg + m * 2) / 3; b = (b + m * 2) / 3 + 8; }
       const o = (j * px + i) * 4;
@@ -36,6 +40,10 @@ export class Minimap {
     const bg = big.getContext('2d');
     bg.imageSmoothingEnabled = true;
     bg.drawImage(c, 0, 0, big.width, big.height);
+    // 길 · 성벽
+    bg.strokeStyle = 'rgba(150,110,70,0.9)'; bg.lineWidth = 3;
+    for (const road of HARVEN.roads) { bg.beginPath(); road.forEach(([x, z], i) => { const px2 = (x + S / 2) * this.bgScale, pz2 = (z + S / 2) * this.bgScale; i ? bg.lineTo(px2, pz2) : bg.moveTo(px2, pz2); }); bg.stroke(); }
+    bg.strokeStyle = '#7a7268'; bg.lineWidth = 2.5; bg.beginPath(); bg.arc(S / 2 * this.bgScale, S / 2 * this.bgScale, HARVEN.walls.r * this.bgScale, 0, Math.PI * 2); bg.stroke();
     bg.fillStyle = '#8a5a3c';
     for (const h of HARVEN.houses) bg.fillRect((h.x - h.w / 2 + S / 2) * this.bgScale, (h.z - h.d / 2 + S / 2) * this.bgScale, h.w * this.bgScale, h.d * this.bgScale);
     bg.fillStyle = '#ffd27a';

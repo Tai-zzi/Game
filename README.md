@@ -16,9 +16,10 @@ npm run test:logic # 렌더러 없이 게임 로직만 Node 에서 검증 (직�
 ```
 
 ## 캐릭터 생성
-- **이름 · 출신 · 전투 직업**을 따로 고릅니다. 수선공 연맹 가입은 선택(하일라에게 문의, 거절해도 불이익 없음).
+- **이름 · 출신 · 전투 계열**을 따로 고릅니다. 계열(일반/기사/탱커/원거리/마법사)의 견습 직업으로 시작해 **Lv 10에 교육 담당자에게서 전직**합니다. 아래 4직업은 전직 직업입니다. 대응표와 열린 질문은 [docs/class_advancement.md](docs/class_advancement.md)에 있습니다 (v0.3 제안 기준).
+- 대화·확인 창: **E**(또는 Enter/Space)로 확정, **Esc**로 취소, **1–9 · ↑↓ · W/S**로 선택. 기본 버튼에 [E] 표시가 붙습니다. 수선공 연맹 가입은 선택(하일라에게 문의, 거절해도 불이익 없음).
 - **출신 5종**: 농가 출신 / 항구 노동자 / 공방 견습 / 유랑민 / 폐허 정착민 — 전투 능력은 같고 시작 소지품·소개 대사만 다름.
-- **전투 직업 4종** (단면 범위, 수치는 모두 검증 전 예시)
+- **전직 직업 4종** (단면 범위, 수치는 모두 검증 전 예시)
 
 | 직업 | 무기 실루엣 | 자원 (획득 → 소모 → 고갈) | 기본 공격 | 대표 기술 (Q/W/E) |
 |---|---|---|---|---|
@@ -62,7 +63,7 @@ npm run test:logic # 렌더러 없이 게임 로직만 Node 에서 검증 (직�
 | C (WASD 모드는 Z) / 적 좌클릭 | 기본 공격 3연타 |
 | Q W E R / A S D F (WASD 모드는 1~8) | 직업 기술 8개 |
 | V (WASD 모드는 X) | 각성기 |
-| Shift | 질주 (기력) |
+| Shift | 질주 (기력 소모 없음) |
 | G | 상호작용 |
 | T | 회복약 |
 | M / K | 세계 지도 / 인연 창 |
@@ -91,6 +92,13 @@ tools/higgsfield/     아트 생성 프리셋 (4직업 전신 시트, 하일라�
 `public/models/<modelId>.glb` 가 있으면 절차적 모델 대신 사용합니다.
 `player_guardian` `player_archer` `player_elementalist` `player_dyer` `npc_haila` `npc_belo` `npc_mora` `npc_merchant` `npc_trainer` `mob_unravel_sheep` `mob_unravel_wolf`
 (정면 +Z, 클립 이름에 idle/run/attack 포함 시 자동 재생)
+
+### 실사 캐릭터 (Mixamo FBX)
+- 스킨: `public/models/realistic/_src/`. 수호기사 = Paladin J Nordstrom, 매듭궁수 = Erika Archer, 원소직조사 = Heraklios, 생명염색사 = Knight D Pelegrini, 벨로 = castle_guard_01, 모라와 주민 = Peasant Girl.
+- 동작: `_src/anim_sword_shield`, `anim_longbow`, `anim_magic`. 뼈대(mixamorig)가 같아서 이름으로 그대로 재생합니다. 게임 상태(idle/walk/run/sprint/공격 연타/cast/shoot/hit/death/dodge/block/talk)와 클립의 대응표는 `src/data/animations.js`의 `MIXAMO_SETS` · `MIXAMO_CLASS_SET` · `MIXAMO_PROC`에 있습니다.
+- 로드할 때 제자리 동작으로 바꿉니다. 엉덩이 XZ 위치는 고정하고, Y는 스킨의 엉덩이 높이 비율로 맞춥니다. 이동은 코드가 맡습니다.
+- 우선순위: `models/<id>.glb` → `models/realistic/<이름>.glb` → Mixamo FBX → NPC AI 정적 모델 → KayKit → 절차적 모델. 앞 단계가 실패하면 다음 단계로 넘어갑니다.
+- 무기 메시는 아직 손에 붙이지 않았습니다.
 
 ## 살아 있는 거점 · 관계 (v0.3 제안 기준)
 - **하루 시계**: 게임 하루 = 실제 20분 (`src/data/households.js` CLOCK). 시간에 따라 해·하늘·그림자가 바뀌고, HUD 오른쪽 위에 시계.
@@ -122,7 +130,8 @@ tools/higgsfield/     아트 생성 프리셋 (4직업 전신 시트, 하일라�
 
 ## 지도 · 질주
 - **M — 세계 지도**: 수놓은 천 지도. 가 본 곳만 보이고 나머지는 양피지 안개. 만난 사람의 지금 위치, 거점·다리 상태·상점·훈련장·진료소, 진행 중 계약 목표, 찾은 단서, 위험 지역, 범례. 휠 확대·드래그 이동·클릭으로 목적지 표시(미니맵과 화면 화살표에 나타남). 게임은 멈추지 않는다.
-- **Shift — 질주**: 이동 속도 1.6배, 기력 소모(전투 중 더 빨리). 구르기도 같은 기력을 쓴다. 0이 되면 20% 회복할 때까지 질주 불가. 수치는 `src/data/feel.js` move.
+- **Shift — 질주**: 이동 속도 1.6배, 기력 소모 없음. 수치는 `src/data/feel.js` move.
+- **넓은 지도 (약 1.6 km)**: 64 m 청크 지형(LOD), 지역 8곳(성곽 거점 · 계곡 · 숲 · 호수 · 언덕 · 폐허 · 농지 · 분지), 도로 · 이정표, 몬스터 야영지(Lv 3–15). **실 닻**(6곳)은 6 m 안에 들어가면 발견되고, 세계 지도에서 발견한 닻을 클릭하면 2.5초 동안 집중한 뒤 이동합니다.
 - **F9**: 타격감 시험용 허수아비 (공격하지 않음).
 
 저장 형식 v3 (v2 → v3 이관: 관계 축은 기억 태그에서 추정, 탐험·시계·히든 퀘스트는 새로 시작).

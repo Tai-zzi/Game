@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { MODEL_SPECS } from './ProceduralModels.js';
-import { RIG_FILES, MODEL_RIGS, STYLES, SKILL_ANIMS, BODY_PART } from '../data/animations.js';
+import { RIG_FILES, MODEL_RIGS, STYLES, SKILL_ANIMS, BODY_PART, REALISTIC_FILES, REALISTIC_ANIMS, REALISTIC_STYLE, KAYKIT_PROPORTION, MIXAMO_DIR, MIXAMO_SKINS, MIXAMO_SETS, MIXAMO_CLASS_SET, MIXAMO_PROC } from '../data/animations.js';
 import { NPC_AI, PROP_AI } from '../data/aiAssets.js';
 import { AiAssets } from './AiAssets.js';
 import { addRim } from './shaders.js';
@@ -33,6 +34,56 @@ async function fetchGLB(url) {
     })());
   }
   return glbCache.get(url);
+}
+
+const fbxLoader = new FBXLoader();
+const fbxCache = new Map();
+const encPath = (p) => p.split('/').map(encodeURIComponent).join('/');
+/** FBX 1회 로드·캐시. 스킨은 Phong → PBR(Standard) 재질로 바꿔 둔다 */
+function fetchFBX(path, skin = false) {
+  if (!fbxCache.has(path)) {
+    fbxCache.set(path, (async () => {
+      try {
+        const obj = await fbxLoader.loadAsync(BASE + encPath(MIXAMO_DIR + path));
+        if (skin) obj.traverse((o) => {
+          if (!o.isMesh) return;
+          const conv = (m) => {
+            const metal = /armor|helmet|knight|paladin|metal/i.test(o.name + m.name);
+            const n = new THREE.MeshStandardMaterial({ name: m.name, map: m.map || null, normalMap: m.normalMap || null, color: m.map ? 0xffffff : m.color,
+              roughness: metal ? 0.48 : 0.82, metalness: metal ? 0.55 : 0.04, transparent: m.transparent && m.opacity < 1, opacity: m.opacity, alphaTest: m.alphaTest || (m.map && m.transparent ? 0.4 : 0), side: m.side });
+            if (n.map) n.map.colorSpace = THREE.SRGBColorSpace;
+            m.dispose();
+            return n;
+          };
+          o.material = Array.isArray(o.material) ? o.material.map(conv) : conv(o.material);
+        });
+        return obj;
+      } catch (e) { console.warn('[CharacterModel] FBX 실패', path, e); return null; }
+    })());
+  }
+  return fbxCache.get(path);
+}
+const mixClipCache = new Map();
+/** 동작 클립을 '제자리'로: 엉덩이 XZ 는 스킨의 기본 위치로 고정, Y 는 뼈대 키 비율로 맞춤 */
+async function mixamoClip(animPath, skinPath, skinHips) {
+  const key = animPath + '|' + skinPath;
+  if (!mixClipCache.has(key)) {
+    mixClipCache.set(key, (async () => {
+      const a = await fetchFBX(animPath);
+      const src = a?.animations?.[0];
+      if (!src) return null;
+      const clip = src.clone();
+      const hipsA = a.getObjectByName('mixamorigHips');
+      const ratio = hipsA && hipsA.position.y ? skinHips.y / hipsA.position.y : 1;
+      for (const t of clip.tracks) {
+        if (t.name !== 'mixamorigHips.position') continue;
+        const v = t.values;
+        for (let i = 0; i < v.length; i += 3) { v[i] = skinHips.x; v[i + 1] *= ratio; v[i + 2] = skinHips.z; }
+      }
+      return clip;
+    })());
+  }
+  return mixClipCache.get(key);
 }
 
 let useRigs = true; // 저품질에서도 리그는 사용 (AI 정적 메시만 끔)
@@ -96,19 +147,47 @@ export class CharacterModel {
     const own = await fetchGLB(`models/${this.modelId}.glb`);
     if (this.disposed) return;
     if (own) return this.useGLB(own);
+    // 실사 리그 (Mixamo 등) + 별도 애니메이션 파일
+    const realKey = REALISTIC_FILES[this.modelId];
+    if (realKey) {
+      const real = await fetchGLB(`models/realistic/${realKey}.glb`);
+      if (this.disposed) return;
+      if (real) {
+        const anims = [...(real.animations || [])];
+        for (const a of REALISTIC_ANIMS) {
+          const g = await fetchGLB(`models/realistic/anims/${a}.glb`);
+          if (g?.animations?.[0]) { const c = g.animations[0].clone(); c.name = a; anims.push(c); }
+        }
+        return this.useGLB({ scene: real.scene, animations: anims }, null, REALISTIC_STYLE);
+      }
+    }
+    // Mixamo FBX 실사 캐릭터 (스킨 + 공용 동작 묶음)
+    const mixSkin = MIXAMO_SKINS[this.modelId];
+    if (mixSkin && useRigs) {
+      const skin = await fetchFBX(mixSkin, true);
+      if (this.disposed) return;
+      if (skin) return this.useMixamo(skin, mixSkin, MIXAMO_SETS[MIXAMO_CLASS_SET[this.modelId] || 'sword']);
+    }
+    // NPC: 실사 AI 정적 모델이 있으면 우선 (귀여운 리그보다 실사 느낌)
+    const npc = opts.npcId && NPC_AI[opts.npcId];
+    if (npc) {
+      const r = await AiAssets.first(npc.ids);
+      if (this.disposed) return;
+      if (r) {
+        if (r.id !== npc.ids[0]) r.obj.traverse((o) => { if (o.isMesh && o.material.color) o.material.color.multiply(new THREE.Color(npc.tint)); });
+        return this.useStatic(r.obj);
+      }
+    }
     const rig = MODEL_RIGS[this.modelId];
     if (rig && useRigs) {
       const g = await fetchGLB(RIG_FILES[rig.rig]);
       if (this.disposed) return;
       if (g) return this.useGLB(g, rig);
     }
-    const npc = opts.npcId && NPC_AI[opts.npcId];
-    const aiIds = npc ? npc.ids : PROP_AI[this.modelId] ? [PROP_AI[this.modelId]] : null;
-    if (aiIds && !rig) {
-      const r = await AiAssets.first(aiIds, { tint: npc && aiIds.indexOf(aiIds[0]) === 0 ? null : npc?.tint });
+    const aiIds = PROP_AI[this.modelId] ? [PROP_AI[this.modelId]] : null;
+    if (aiIds) {
+      const r = await AiAssets.first(aiIds);
       if (this.disposed || !r) return;
-      // 대역(클래스 모델)일 때만 색조
-      if (npc && r.id !== npc.ids[0]) r.obj.traverse((o) => { if (o.isMesh && o.material.color) o.material.color.multiply(new THREE.Color(npc.tint)); });
       this.useStatic(r.obj);
     }
   }
@@ -136,7 +215,7 @@ export class CharacterModel {
     this.collectMaterials();
   }
 
-  useGLB(gltf, rig = null) {
+  useGLB(gltf, rig = null, styleOverride = null) {
     const scene = SkeletonUtils.clone(gltf.scene);
     scene.traverse((o) => {
       if (!o.isMesh) return;
@@ -159,10 +238,41 @@ export class CharacterModel {
     this.collectMaterials();
     this.mixer = new THREE.AnimationMixer(scene);
     this.clips = Object.fromEntries(gltf.animations.map((a) => [a.name, a]));
-    this.style = STYLES[rig?.style] || STYLES.swordShield;
+    this.style = styleOverride || STYLES[rig?.style] || STYLES.swordShield;
+    // KayKit 비율 완화용 뼈 (애니메이션 뒤에 배율 적용)
+    this.propBones = [];
+    if (rig) scene.traverse((o) => { if (o.isBone && KAYKIT_PROPORTION[o.name]) this.propBones.push([o, KAYKIT_PROPORTION[o.name]]); });
     this.kind = 'rig';
     this.current = null;
     this.playLoop(this.loco);
+  }
+
+  /** Mixamo 스킨 사용: 즉시 교체 후 동작 클립은 도착하는 대로 붙인다 (대기 → 이동 → 나머지 순) */
+  useMixamo(skin, skinPath, set) {
+    const npc = this.modelId.startsWith('npc_');
+    const style = { idle: 'idle', run: npc ? 'walk' : 'run', walk: 'walk', sprint: 'sprint', block: 'block', death: 'death', dodge: 'dodge', cast: 'cast', shoot: 'shoot', heavy: 'heavy', talk: 'talk', hit: [], combo: [] };
+    this.useGLB({ scene: skin, animations: [] }, null, style);
+    this.mixamo = set;
+    const hips = skin.getObjectByName('mixamorigHips')?.position.clone() || new THREE.Vector3();
+    const jobs = [];
+    for (const [state, v] of Object.entries(set)) {
+      if (state === 'dir') continue;
+      const files = Array.isArray(v) ? v : [v];
+      files.forEach((f, i) => jobs.push([Array.isArray(v) ? state + i : state, state, Array.isArray(v), f]));
+    }
+    const prio = (st) => (st === 'idle' ? 0 : st === 'run' || st === 'walk' ? 1 : 2);
+    jobs.sort((a, b) => prio(a[1]) - prio(b[1]));
+    const mixer = this.mixer;
+    (async () => {
+      for (const [name, state, isList, f] of jobs) {
+        const clip = await mixamoClip(set.dir + f, skinPath, hips);
+        if (this.disposed || this.mixer !== mixer) return;
+        if (!clip) continue;
+        this.clips[name] = clip;
+        if (isList) this.style[state].push(name);
+        if (!this.action && !this.dead && (name === 'idle' || name === this.style[this.loco])) { this.current = null; this.playLoop(this.loco); }
+      }
+    })();
   }
 
   clipAction(name) { const c = this.clips?.[name]; return c ? this.mixer.clipAction(c) : null; }
@@ -202,10 +312,15 @@ export class CharacterModel {
     const dur = map.duration || windup + recovery;
     this.action = { start: now, strikeAt: now + (windup || dur * 0.4), end: now + Math.max(dur, windup + recovery) + 0.12, proc: map.proc || 'melee', combo, windup: windup || dur * 0.4 };
     if (this.kind === 'rig') {
-      const name = map.combo ? this.style.combo[combo % this.style.combo.length] : map.clip;
+      let name = map.combo ? this.style.combo[combo % this.style.combo.length] : map.clip;
+      let ratio = Array.isArray(map.strike) ? map.strike[combo % map.strike.length] : map.strike;
+      if (this.mixamo) {
+        const [st, r] = MIXAMO_PROC[map.proc] || MIXAMO_PROC.melee;
+        if (!map.combo) { name = this.style[st] || this.style.combo[0]; ratio = r; }
+        if (map.proc === 'dodge') ratio = 0;
+      }
       const a = this.clipAction(name);
       if (!a) return;
-      const ratio = Array.isArray(map.strike) ? map.strike[combo % map.strike.length] : map.strike;
       const len = a.getClip().duration;
       const ts = ratio > 0 && windup > 0 ? (len * ratio) / windup : len / (map.duration || dur);
       a.reset().setLoop(THREE.LoopOnce, 1).setEffectiveWeight(1);
@@ -275,6 +390,7 @@ export class CharacterModel {
     }
     if (this.current && this.loco === 'sprint' && !this.style.sprint) this.current.setEffectiveTimeScale(1.4);
     if (this.mixer) this.mixer.update(dt);
+    if (this.propBones) for (const [b, s] of this.propBones) { if (b.name === 'head') b.scale.setScalar(s); else b.scale.y = s; }
     if (this.kind === 'proc') this.animateProcedural(dt, t + this.phase);
     else if (this.kind === 'static') this.animateStatic(dt, t + this.phase);
     // 피격 찌그러짐(squash) + 섬광
